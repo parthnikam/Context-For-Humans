@@ -13,6 +13,7 @@ const projects = [
   {
     id: "p2",
     name: "Other project",
+    categoryId: "uncategorized",
     links: [{ title: "Conversation C", url: "https://example.test/c" }],
   },
 ];
@@ -34,6 +35,15 @@ assert.throws(
   /no longer belongs/,
 );
 assert.equal(moveConversation(projects, "p1", "p1", "https://example.test/a"), projects);
+assert.throws(
+  () => moveConversation(
+    [{ ...projects[0], categoryId: "programming" }, { ...projects[1], categoryId: "movies-film" }],
+    "p1",
+    "p2",
+    "https://example.test/a",
+  ),
+  /same category/,
+);
 
 const appended = appendGraphData(
   projects,
@@ -46,6 +56,7 @@ const appended = appendGraphData(
     {
       id: "project-1",
       name: "Old name",
+      categoryId: "uncategorized",
       intent: "Merged intent",
       links: [
         { title: "New conversation", url: "https://example.test/new" },
@@ -55,6 +66,7 @@ const appended = appendGraphData(
     {
       id: "p2",
       name: "Fresh project",
+      categoryId: "uncategorized",
       intent: "",
       links: [{ title: "Fresh link", url: "https://example.test/fresh" }],
     },
@@ -72,6 +84,15 @@ assert.notEqual(appended.projects[2].id, "p2");
 assert.equal(appended.conversations.length, 5);
 assert.ok(appended.conversations.some((item) => item.url === "https://example.test/fresh"));
 assert.equal(appended.projects[0].links.filter((link) => link.url.includes("/a")).length, 1);
+const separatedCategories = appendGraphData(
+  [{ id: "prog", name: "Project A", categoryId: "programming", links: [] }],
+  [{ title: "Existing", url: "https://example.test/existing" }],
+  [{ name: "Project A", categoryId: "movies-film", categoryName: "Movies and film", links: [
+    { title: "New", url: "https://example.test/new-category" },
+  ] }],
+  [{ title: "New", url: "https://example.test/new-category" }],
+);
+assert.equal(separatedCategories.projects.length, 2, "same names in different categories stay separate");
 assert.equal(projects[0].links.length, 2, "append does not mutate prior graph data");
 
 console.log("Graph rename and conversation reassignment checks passed.");

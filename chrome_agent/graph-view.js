@@ -1,10 +1,10 @@
-import { graphModel } from "./graph-model.js";
-
 const positions = new Map();
 const LAYOUT = 3;
 const mountedGraphs = new WeakMap();
+const categoryExpansion = new WeakMap();
 
 function radius(node) {
+  if (node.kind === "category") return 15;
   if (node.kind === "link") return 5;
   if (node.kind === "child") return 9;
   if (node.kind === "suggestion") return 8;
@@ -20,6 +20,7 @@ function publish(node) {
     intent: node.intent || "",
     url: node.url || "",
     projectId: node.projectId || "",
+    categoryId: node.categoryId || "",
     links: node.kind === "project"
       ? (node.links || []).map((link) => ({ title: link.title || "", url: link.url || "" }))
       : [],
@@ -30,6 +31,18 @@ function clip(label, max) {
   const text = String(label || "");
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+function searchUrlKey(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return value;
+  }
 }
 
 export function fillGraphDetail(host, node, onOpen, onEdit, projects = []) {
@@ -55,6 +68,20 @@ export function fillGraphDetail(host, node, onOpen, onEdit, projects = []) {
   });
   heading.append(title, close);
   host.append(heading);
+  if (node.kind === "category") {
+    const categoryProjects = projects.filter(
+      (project) => (project.categoryId || "uncategorized") === node.categoryId,
+    );
+    const conversations = categoryProjects.reduce(
+      (count, project) => count + (project.links || []).length,
+      0,
+    );
+    const summary = document.createElement("p");
+    summary.className = "one-liner";
+    summary.textContent = `${categoryProjects.length} project(s) · ${conversations} conversation(s)`;
+    host.append(summary);
+    return;
+  }
   if (node.kind === "suggestion") {
     const line = document.createElement("p");
     line.className = "one-liner";
@@ -117,6 +144,7 @@ export function fillGraphDetail(host, node, onOpen, onEdit, projects = []) {
       moveSelect.append(new Option("Move to project...", ""));
       for (const project of projects) {
         if (project.id === node.projectId) continue;
+        if ((project.categoryId || "uncategorized") !== node.categoryId) continue;
         const option = new Option(project.name, project.id);
         moveSelect.append(option);
       }
@@ -177,11 +205,6 @@ export function mountGraph(canvas, model, options = {}) {
       });
     });
   }
-  const family = new Set(
-    edges
-      .filter((edge) => edge.kind === "parent")
-      .map((edge) => `${edge.source.id}\0${edge.target.id}`),
-  );
   if (positions.get("__v")?.x !== LAYOUT) {
     positions.clear();
     positions.set("__v", { x: LAYOUT, y: 0 });
@@ -259,14 +282,23 @@ export function mountGraph(canvas, model, options = {}) {
     const query = String(options.getQuery?.() || "")
       .trim()
       .toLowerCase();
-    if (!query) return null;
-    const matches = new Set(
-      nodes
-        .filter((node) => `${node.label} ${node.intent || ""}`.toLowerCase().includes(query))
-        .map((node) => node.id),
-    );
+    const semanticUrls = options.getSemanticMatches?.() || new Set();
+    if (!query && !semanticUrls.size) return null;
+    const lexicalMatches = new Set(nodes
+      .filter((node) => query && `${node.label} ${node.intent || ""}`.toLowerCase().includes(query))
+      .map((node) => node.id));
+    const semanticNodeIds = new Set(nodes
+      .filter((node) => node.url && semanticUrls.has(searchUrlKey(node.url)))
+      .map((node) => node.id));
+    const matches = new Set([...lexicalMatches, ...semanticNodeIds]);
     for (const edge of edges) {
-      if (matches.has(edge.source.id) || matches.has(edge.target.id)) {
+      if (semanticNodeIds.has(edge.source.id) || semanticNodeIds.has(edge.target.id)) {
+        matches.add(edge.source.id);
+        matches.add(edge.target.id);
+      }
+    }
+    for (const edge of edges) {
+      if (lexicalMatches.has(edge.source.id) || lexicalMatches.has(edge.target.id)) {
         matches.add(edge.source.id);
         matches.add(edge.target.id);
       }
@@ -386,6 +418,7 @@ export function mountGraph(canvas, model, options = {}) {
     }
 
     const query = String(options.getQuery?.() || "").trim().toLowerCase();
+    const semanticUrls = options.getSemanticMatches?.() || new Set();
     for (const node of nodes) {
       const dim = faded(node.id);
       ctx.globalAlpha = dim ? 0.12 : 1;
@@ -406,6 +439,13 @@ export function mountGraph(canvas, model, options = {}) {
       if (node === hover || node === selected) {
         ctx.lineWidth = 2;
         ctx.strokeStyle = paint.ink;
+        ctx.stroke();
+      }
+      if (node.url && semanticUrls.has(searchUrlKey(node.url))) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.r + 3, 0, Math.PI * 2);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = paint.accent;
         ctx.stroke();
       }
       const named =
@@ -447,8 +487,12 @@ export function mountGraph(canvas, model, options = {}) {
           dist2 = dx * dx + dy * dy;
         }
         const dist = Math.sqrt(dist2);
-        const separateProjects =
-          isProject(a) && isProject(b) && !family.has(`${a.id}\0${b.id}`) && !family.has(`${b.id}\0${a.id}`);
+        const separateProjects = isProject(a) && isProject(b) && (
+          (a.kind === "category" && b.kind === "category")
+          || (a.kind === "project" && b.kind === "project" && a.categoryId !== b.categoryId)
+          || (a.kind === "category" && b.kind === "project" && a.categoryId !== b.categoryId)
+          || (a.kind === "project" && b.kind === "category" && a.categoryId !== b.categoryId)
+        );
         const push = ((separateProjects ? 700 : 420) * cool * dt) / dist2;
         const fx = (dx / dist) * push;
         const fy = (dy / dist) * push;
@@ -662,7 +706,7 @@ export function mountGraph(canvas, model, options = {}) {
     selected = node;
     options.onSelect?.(publish(node));
     focusNode(node);
-    options.onOpen?.(publish(node));
+    if (node.kind !== "category") options.onOpen?.(publish(node));
   }
 
   function onKey(event) {
@@ -708,17 +752,33 @@ export function mountGraph(canvas, model, options = {}) {
 }
 
 function isProject(node) {
-  return node.kind === "project" || node.kind === "child" || node.kind === "suggestion";
+  return node.kind === "category" || node.kind === "project" || node.kind === "child" || node.kind === "suggestion";
 }
 
 function placeFresh(nodes, edges) {
-  const hubs = nodes.filter((node) => node.kind === "project" || node.kind === "suggestion");
+  const categories = nodes.filter((node) => node.kind === "category");
+  const hubs = categories.length
+    ? categories
+    : nodes.filter((node) => node.kind === "project" || node.kind === "suggestion");
   hubs.forEach((node, index) => {
     const angle = (index / Math.max(hubs.length, 1)) * Math.PI * 2 - Math.PI / 2;
-    const ring = 88 + hubs.length * 18;
+    const ring = categories.length ? 220 + categories.length * 24 : 88 + hubs.length * 18;
     node.x = Math.cos(angle) * ring;
     node.y = Math.sin(angle) * ring;
   });
+  if (categories.length) {
+    for (const category of categories) {
+      const children = edges
+        .filter((edge) => edge.kind === "parent" && edge.source === category)
+        .map((edge) => edge.target);
+      children.forEach((project, index) => {
+        const angle = (index / Math.max(children.length, 1)) * Math.PI * 2;
+        const ring = 88 + children.length * 12;
+        project.x = category.x + Math.cos(angle) * ring;
+        project.y = category.y + Math.sin(angle) * ring;
+      });
+    }
+  }
   for (const [index, node] of nodes.entries()) {
     if (node.kind !== "child") continue;
     const parent = edges.find((edge) => edge.kind === "parent" && edge.target === node)?.source;
@@ -754,46 +814,221 @@ function placeMissing(nodes, edges) {
   });
 }
 
-export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit) {
-  mountedGraphs.get(host)?.destroy();
+export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit, graphOptions = {}) {
+  const previous = mountedGraphs.get(host);
+  previous?.destroy();
   host.replaceChildren();
-
-  const stage = document.createElement("div");
-  stage.className = "graph-stage";
-  const canvas = document.createElement("canvas");
-  canvas.className = "graph-canvas";
-  canvas.setAttribute("aria-label", "Interactive project and conversation graph");
-  const hud = document.createElement("div");
-  hud.className = "graph-hud";
   const find = document.createElement("input");
   find.className = "graph-find";
   find.type = "search";
-  find.placeholder = "Find a project or conversation";
-  find.setAttribute("aria-label", "Find in the graph");
-  hud.append(find);
-
-  detailHost.className = "graph-detail";
+  find.placeholder = "Search projects or conversations by meaning";
+  find.setAttribute("aria-label", "Search categories, projects, and conversation titles");
+  const results = document.createElement("div");
+  results.className = "category-browser-list";
+  host.classList.add("category-browser");
+  host.append(find, results);
   detailHost.hidden = true;
-  stage.append(canvas, hud, detailHost);
-  host.append(stage);
+  detailHost.replaceChildren();
 
-  const model = graphModel({ projects });
-  if (!model.nodes.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty-graph";
-    empty.textContent = "Extract conversations or import a CSV to build the graph.";
-    stage.append(empty);
-    return;
+  const openCategories = categoryExpansion.get(host) || new Set();
+  categoryExpansion.set(host, openCategories);
+  let semanticMatches = new Set();
+  let searchTimer = 0;
+  let searchSequence = 0;
+
+  function drawCategories(query = find.value.trim().toLowerCase()) {
+    results.replaceChildren();
+    const categories = new Map();
+    for (const project of projects) {
+      const id = String(project.categoryId || "uncategorized");
+      const name = String(project.categoryName || (id === "uncategorized" ? "Needs category repair" : id));
+      const entry = categories.get(id) || { id, name, projects: [] };
+      entry.projects.push(project);
+      categories.set(id, entry);
+    }
+
+    const ordered = [...categories.values()].sort((left, right) => left.name.localeCompare(right.name));
+    if (!ordered.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-graph";
+      empty.textContent = "Import conversations to build your category list.";
+      results.append(empty);
+      return;
+    }
+
+    let visibleCategoryCount = 0;
+    for (const category of ordered) {
+      const categoryHasSemanticMatch = category.projects.some((project) =>
+        (project.links || []).some((link) => semanticMatches.has(searchUrlKey(link.url)))
+      );
+      const matchingProjects = category.projects.filter((project) => {
+        if (!query) return true;
+        return category.name.toLowerCase().includes(query)
+          || String(project.name || "").toLowerCase().includes(query)
+          || String(project.intent || "").toLowerCase().includes(query)
+          || (project.links || []).some((link) => (
+            String(link.title || "").toLowerCase().includes(query)
+            || semanticMatches.has(searchUrlKey(link.url))
+          ));
+      });
+      if (!matchingProjects.length && query && !categoryHasSemanticMatch) continue;
+
+      visibleCategoryCount += 1;
+      const section = document.createElement("details");
+      section.className = "category-item";
+      section.open = openCategories.has(category.id) || Boolean(query && matchingProjects.length);
+      section.addEventListener("toggle", () => {
+        if (section.open) openCategories.add(category.id);
+        else openCategories.delete(category.id);
+      });
+
+      const summary = document.createElement("summary");
+      summary.className = "category-summary";
+      const categoryName = document.createElement("span");
+      categoryName.className = "category-name";
+      categoryName.textContent = category.name;
+      const categoryCount = document.createElement("span");
+      const conversationCount = category.projects.reduce(
+        (count, project) => count + (project.links || []).length,
+        0,
+      );
+      categoryCount.className = "category-count";
+      categoryCount.textContent = `${category.projects.length} project(s) · ${conversationCount} link(s)`;
+      summary.append(categoryName, categoryCount);
+      section.append(summary);
+
+      for (const project of matchingProjects) {
+        const projectSection = document.createElement("section");
+        projectSection.className = "category-project";
+        const projectHeading = document.createElement("div");
+        projectHeading.className = "category-project-heading";
+        const projectTitle = document.createElement("strong");
+        projectTitle.className = "category-project-title";
+        projectTitle.textContent = project.name || "Untitled project";
+        projectHeading.append(projectTitle);
+        if (project.intent) {
+          const intent = document.createElement("span");
+          intent.className = "category-project-intent";
+          intent.textContent = project.intent;
+          projectHeading.append(intent);
+        }
+
+        const renameForm = document.createElement("form");
+        renameForm.className = "category-project-rename";
+        const renameInput = document.createElement("input");
+        renameInput.type = "text";
+        renameInput.maxLength = 100;
+        renameInput.value = project.name || "";
+        renameInput.setAttribute("aria-label", `Rename ${project.name || "project"}`);
+        const renameButton = document.createElement("button");
+        renameButton.type = "submit";
+        renameButton.textContent = "Rename";
+        renameForm.append(renameInput, renameButton);
+        renameForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          onEdit?.({ type: "rename", projectId: project.id, name: renameInput.value });
+        });
+        projectHeading.append(renameForm);
+        projectSection.append(projectHeading);
+
+        const links = (project.links || []).filter((link) => {
+          if (!query) return true;
+          return category.name.toLowerCase().includes(query)
+            || String(project.name || "").toLowerCase().includes(query)
+            || String(project.intent || "").toLowerCase().includes(query)
+            || String(link.title || "").toLowerCase().includes(query)
+            || semanticMatches.has(searchUrlKey(link.url));
+        });
+        const linkList = document.createElement("ul");
+        linkList.className = "category-links";
+        for (const link of links) {
+          const row = document.createElement("li");
+          row.className = "category-link-row";
+          if (semanticMatches.has(searchUrlKey(link.url))) row.classList.add("semantic-match");
+          const anchor = document.createElement("a");
+          anchor.className = "category-link";
+          anchor.href = link.url;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          anchor.textContent = link.title || link.url;
+          anchor.title = link.url;
+          anchor.addEventListener("click", (event) => {
+            event.preventDefault();
+            onOpen?.({
+              kind: "link",
+              label: link.title || link.url,
+              url: link.url,
+              projectId: project.id,
+            });
+          });
+          row.append(anchor);
+
+          const targets = category.projects.filter((target) => target.id !== project.id);
+          if (targets.length) {
+            const moveSelect = document.createElement("select");
+            moveSelect.className = "category-link-move";
+            moveSelect.setAttribute("aria-label", `Move ${link.title || link.url} to another project in ${category.name}`);
+            moveSelect.append(new Option("Move...", ""));
+            for (const target of targets) moveSelect.append(new Option(target.name, target.id));
+            moveSelect.addEventListener("change", () => {
+              if (!moveSelect.value) return;
+              onEdit?.({
+                type: "move",
+                projectId: project.id,
+                targetProjectId: moveSelect.value,
+                url: link.url,
+              });
+            });
+            row.append(moveSelect);
+          }
+          linkList.append(row);
+        }
+        projectSection.append(linkList);
+        section.append(projectSection);
+      }
+      results.append(section);
+    }
+
+    if (query && !visibleCategoryCount) {
+      const empty = document.createElement("p");
+      empty.className = "empty-graph";
+      empty.textContent = "No category or conversation matches that search.";
+      results.append(empty);
+    }
   }
 
-  const handle = mountGraph(canvas, model, {
-    getQuery: () => find.value,
-    onSelect(node) {
-      fillGraphDetail(detailHost, node, onOpen, onEdit, projects);
-    },
-    onOpen,
+  drawCategories();
+  find.addEventListener("input", () => {
+    semanticMatches = new Set();
+    drawCategories();
+    window.clearTimeout(searchTimer);
+    const sequence = ++searchSequence;
+    const query = find.value.trim();
+    if (query.length < 2 || typeof graphOptions.search !== "function") {
+      return;
+    }
+    searchTimer = window.setTimeout(async () => {
+      try {
+        const result = await graphOptions.search(query);
+        if (sequence !== searchSequence) return;
+        semanticMatches = new Set((Array.isArray(result.matches) ? result.matches : [])
+          .map((item) => searchUrlKey(item.url))
+          .filter(Boolean));
+        drawCategories();
+        onStatus?.(semanticMatches.size
+          ? `Found ${semanticMatches.size} semantically similar conversation(s).`
+          : "No semantic matches found in the saved conversations.");
+      } catch (error) {
+        if (sequence !== searchSequence) return;
+        drawCategories();
+        onStatus?.(`Similarity search unavailable: ${error.message}`);
+      }
+    }, 300);
   });
-  mountedGraphs.set(host, handle);
-  find.addEventListener("input", () => handle.redraw());
-  onStatus?.("Drag to move. Scroll to zoom. Click a node to inspect it; click a conversation to open it.");
+  mountedGraphs.set(host, {
+    destroy() {
+      window.clearTimeout(searchTimer);
+      searchSequence += 1;
+    },
+  });
 }

@@ -535,3 +535,145 @@ select {
   color: var(--muted);
   text-align: center;
 }
+
+.graph.category-browser {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.category-browser .graph-find {
+  flex: none;
+  width: 100%;
+  background: var(--bg);
+}
+
+.category-browser-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.category-item {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.category-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 11px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.category-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.category-count {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.category-project {
+  margin: 0 9px 9px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.category-project-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.category-project-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.category-project-intent {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.category-project-rename {
+  display: flex;
+  gap: 4px;
+}
+
+.category-project-rename input,
+.category-project-rename button,
+.category-link-move {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+
+.category-project-rename input {
+  width: min(120px, 30vw);
+}
+
+.category-project-rename button {
+  cursor: pointer;
+}
+
+.category-links {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.category-link-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+}
+
+.category-link-row.semantic-match {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.category-link {
+  min-width: 0;
+  color: var(--link);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.category-link:hover {
+  text-decoration: underline;
+}
+
+.category-link-move {
+  flex: none;
+  max-width: 118px;
+  font-size: 10px;
+}

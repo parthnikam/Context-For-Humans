@@ -1,6 +1,7 @@
 import { renderGraph } from "./graph-view.js";
 import { openGraphNode } from "./graph-actions.js";
 import { moveConversation, renameProject } from "./graph-state.js";
+import { searchTitles } from "./grouping.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const graph = document.querySelector("#graph");
@@ -32,6 +33,7 @@ async function loadGraph() {
       setStatus,
       (node) => openGraphNode(node, saved.projects, setStatus),
       (change) => editSavedGraph(saved, change),
+      { search: (query) => searchTitles(query) },
     );
     counts.textContent = `${saved.projects.length} project(s) · ${saved.conversations.length} conversation(s)`;
     setStatus(saved.source ? `Source: ${saved.source}` : "Saved graph");

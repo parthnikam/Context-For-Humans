@@ -4,8 +4,11 @@ import {
   clearChromaIndex,
   DEFAULT_SIMILARITY_THRESHOLD,
   groupConversations,
+  listCategories,
+  searchTitles,
   syncProjectAssignments,
-  testGeminiKey,
+  testOpenAIService,
+  testTypeSafeService,
   testChromaService,
 } from "./grouping.js";
 import { openGraphNode } from "./graph-actions.js";
@@ -15,7 +18,6 @@ import { runPageAction } from "./page-actions.js";
 import { createCsvDownload } from "./csv-download.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
-const GEMINI_KEY = "conversationGeminiApiKey";
 const LEGACY_MEM0_KEY = "conversationMem0ApiKey";
 const SIMILARITY_THRESHOLD_KEY = "chromaSimilarityThreshold";
 
@@ -30,7 +32,6 @@ const counts = document.querySelector("#counts");
 const graph = document.querySelector("#graph");
 const detail = document.querySelector("#project-detail");
 const settings = document.querySelector("#settings");
-const apiKeyInput = document.querySelector("#api-key");
 const similarityThresholdInput = document.querySelector("#similarity-threshold");
 const downloadButton = document.querySelector("#download");
 const viewLargerLink = document.querySelector("#view-larger");
@@ -44,6 +45,7 @@ let graphSource = "";
 let debugEntries = [];
 let cancelled = false;
 let busy = false;
+let migrationPromise = Promise.resolve();
 
 scanButton.addEventListener("click", detectAreas);
 areaSelect.addEventListener("change", selectArea);
@@ -54,8 +56,8 @@ cancelButton.addEventListener("click", () => {
 });
 csvInput.addEventListener("change", importCsv);
 downloadButton.addEventListener("click", () => createCsvDownload(conversations));
-document.querySelector("#key-form").addEventListener("submit", saveApiKey);
-document.querySelector("#test-gemini-key").addEventListener("click", testGeminiApiKey);
+document.querySelector("#test-openai").addEventListener("click", testOpenAIConnection);
+document.querySelector("#test-typesafe").addEventListener("click", testTypeSafeConnection);
 document.querySelector("#test-chroma").addEventListener("click", testChromaServiceConnection);
 document.querySelector("#clear-graphs").addEventListener("click", clearGraphs);
 document.querySelector("#clear-debug").addEventListener("click", clearDebug);
@@ -69,9 +71,8 @@ initialize();
 
 async function initialize() {
   try {
-    const stored = await chrome.storage.local.get([STORAGE_KEY, GEMINI_KEY, SIMILARITY_THRESHOLD_KEY]);
-    await chrome.storage.local.remove(LEGACY_MEM0_KEY);
-    apiKeyInput.value = String(stored[GEMINI_KEY] || "");
+    const stored = await chrome.storage.local.get([STORAGE_KEY, SIMILARITY_THRESHOLD_KEY]);
+    await chrome.storage.local.remove([LEGACY_MEM0_KEY, "conversationGeminiApiKey"]);
     similarityThresholdInput.value = String(readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]));
     const saved = stored[STORAGE_KEY];
     if (saved && Array.isArray(saved.projects) && Array.isArray(saved.conversations)) {
@@ -79,45 +80,80 @@ async function initialize() {
       conversations = saved.conversations;
       graphSource = String(saved.source || "");
       render();
-      if (conversations.length) setStatus(`Loaded ${conversations.length} saved conversation(s).`);
+      if (conversations.length) {
+        try {
+          const taxonomy = await listCategories({ onDebug: appendDebug });
+          const categoryIds = new Set((taxonomy.categories || []).map((item) => item.id));
+          if (!projects.length || projects.some((project) => !categoryIds.has(String(project.categoryId || "")))) {
+            setStatus("Repairing missing or outdated categories with TypeSafe Jev...");
+            setBusy(true);
+            migrationPromise = migrateLegacyGraph(stored[SIMILARITY_THRESHOLD_KEY], categoryIds);
+            try {
+              await migrationPromise;
+            } finally {
+              setBusy(false);
+            }
+          } else {
+            setStatus(`Loaded ${conversations.length} saved conversation(s).`);
+          }
+        } catch (error) {
+          setStatus(`Could not repair existing categories: ${error.message}`);
+        }
+      }
     }
   } catch (error) {
     setStatus(`Could not load saved data: ${error.message}`);
   }
 }
 
-async function saveApiKey(event) {
-  event.preventDefault();
-  const key = apiKeyInput.value.trim();
-  if (!key) {
-    setStatus("Enter a Gemini API key to save.");
+async function migrateLegacyGraph(savedThreshold, validCategoryIds) {
+  const grouped = await groupConversations({
+    conversations,
+    existingProjects: projects.filter((project) => validCategoryIds.has(project.categoryId)),
+    similarityThreshold: readSimilarityThreshold(savedThreshold),
+    onDebug: appendDebug,
+  });
+  const rebuilt = appendGraphData([], [], grouped, conversations);
+  await persistGraph(rebuilt.projects, rebuilt.conversations, graphSource);
+  projects = rebuilt.projects;
+  conversations = rebuilt.conversations;
+  render();
+  try {
+    await syncProjectAssignments(assignmentsForUrls(conversations.map((item) => item.url)), {
+      onDebug: appendDebug,
+    });
+  } catch (error) {
+    setStatus(`Categorized the saved graph, but could not update ChromaDB project metadata: ${error.message}`);
     return;
   }
-  try {
-    await chrome.storage.local.set({ [GEMINI_KEY]: key });
-    setStatus("Gemini API key saved locally.");
-  } catch (error) {
-    setStatus(`Could not save API key: ${error.message}`);
-  }
+  setStatus(`Categorized the saved graph into ${projects.length} project(s) across ${new Set(projects.map((project) => project.categoryId)).size} category/categories.`);
 }
 
-async function testGeminiApiKey() {
-  const key = apiKeyInput.value.trim();
-  if (!key) {
-    setStatus("Enter a Gemini API key to test.");
-    apiKeyInput.focus();
-    return;
-  }
-  const testButton = document.querySelector("#test-gemini-key");
+async function testOpenAIConnection() {
+  const testButton = document.querySelector("#test-openai");
   testButton.disabled = true;
-  setStatus("Testing Gemini API key...");
+  setStatus("Testing OpenAI configuration through the local service...");
   try {
-    await testGeminiKey(key);
-    setStatus("Gemini API key works.");
+    const result = await testOpenAIService({ onDebug: appendDebug });
+    setStatus(`OpenAI is ready (${result.model}).`);
   } catch (error) {
     setStatus(error.message);
   } finally {
     testButton.disabled = false;
+  }
+}
+
+async function testTypeSafeConnection() {
+  const button = document.querySelector("#test-typesafe");
+  button.disabled = true;
+  setStatus("Testing TypeSafe Jev category classifier...");
+  try {
+    const result = await testTypeSafeService({ onDebug: appendDebug });
+    setStatus(`TypeSafe Jev is ready (${result.category} classification test passed).`);
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -248,6 +284,7 @@ async function importCsv() {
 }
 
 async function groupAndShow(entries, source) {
+  await migrationPromise;
   const knownUrls = new Set(conversations.map((conversation) => urlKey(conversation.url)));
   const newEntries = entries.filter((entry) => !knownUrls.has(urlKey(entry.url)));
   if (!newEntries.length) {
@@ -255,16 +292,9 @@ async function groupAndShow(entries, source) {
     return;
   }
 
-  const stored = await chrome.storage.local.get([GEMINI_KEY, SIMILARITY_THRESHOLD_KEY]);
-  const geminiApiKey = String(stored[GEMINI_KEY] || "").trim();
-  if (!geminiApiKey) {
-    settings.open = true;
-    apiKeyInput.focus();
-    throw new Error("Save a Gemini API key in AI grouping settings to create project groups.");
-  }
+  const stored = await chrome.storage.local.get([SIMILARITY_THRESHOLD_KEY]);
 
   const grouped = await groupConversations({
-    geminiApiKey,
     conversations: newEntries,
     existingProjects: projects,
     similarityThreshold: readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]),
@@ -299,18 +329,22 @@ async function groupAndShow(entries, source) {
 }
 
 async function clearGraphs() {
-  if (!conversations.length && !projects.length) return;
-  if (!confirm("Clear the graph and all locally indexed ChromaDB titles? This cannot be undone.")) return;
+  if (!confirm("Clear the graph, saved conversations, and local ChromaDB index? This cannot be undone.")) return;
+  try {
+    await chrome.storage.local.remove(STORAGE_KEY);
+  } catch (error) {
+    setStatus(`Could not clear the saved graph: ${error.message}`);
+    return;
+  }
+  conversations = [];
+  projects = [];
+  graphSource = "";
+  render();
   try {
     await clearChromaIndex({ onDebug: appendDebug });
-    await chrome.storage.local.remove(STORAGE_KEY);
-    conversations = [];
-    projects = [];
-    graphSource = "";
-    render();
     setStatus("Cleared the graph and local ChromaDB title index.");
   } catch (error) {
-    setStatus(`Could not clear graph data: ${error.message}`);
+    setStatus(`Cleared the graph. Could not clear the local ChromaDB index: ${error.message}`);
   }
 }
 
@@ -369,6 +403,8 @@ function assignmentsForUrls(urls) {
         url: link.url,
         project_id: project.id,
         project_name: project.name,
+        category_id: project.categoryId || "uncategorized",
+        category_name: project.categoryName || "Uncategorized",
       }))
   );
 }
@@ -382,6 +418,8 @@ function assignmentsForProjectIds(projectIds) {
       url: link.url,
       project_id: project.id,
       project_name: project.name,
+      category_id: project.categoryId || "uncategorized",
+      category_name: project.categoryName || "Uncategorized",
     })));
 }
 
@@ -393,13 +431,16 @@ function render() {
     setStatus,
     (node) => openGraphNode(node, projects, setStatus),
     editGraph,
+    {
+      search: (query) => searchTitles(query, { onDebug: appendDebug }),
+    },
   );
   const projectCount = projects.length;
   counts.textContent = conversations.length
     ? `${projectCount} project(s) · ${conversations.length} conversation(s)`
     : "No data";
   downloadButton.disabled = conversations.length === 0;
-  document.querySelector("#clear-graphs").disabled = conversations.length === 0 && projects.length === 0;
+  document.querySelector("#clear-graphs").disabled = busy;
   const hasGraph = conversations.length > 0;
   viewLargerLink.setAttribute("aria-disabled", String(!hasGraph));
   viewLargerLink.tabIndex = hasGraph ? 0 : -1;
@@ -415,6 +456,7 @@ function setBusy(next) {
   csvInput.disabled = next;
   areaSelect.disabled = next || areas.length === 0;
   extractButton.disabled = next || !getSelectedArea();
+  document.querySelector("#clear-graphs").disabled = next;
   if (!next) cancelButton.hidden = true;
 }
 
@@ -440,10 +482,6 @@ function appendDebug(entry) {
     ...entry,
   };
   let text = JSON.stringify(record, null, 2);
-  for (const key of [apiKeyInput.value]) {
-    const secret = key.trim();
-    if (secret) text = text.split(secret).join("[REDACTED API KEY]");
-  }
   if (text.length > 20000) {
     text = `${text.slice(0, 20000)}\n... [record truncated]`;
   }

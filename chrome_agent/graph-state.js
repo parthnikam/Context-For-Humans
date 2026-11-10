@@ -5,8 +5,13 @@ export function appendGraphData(existingProjects, existingConversations, newProj
   }));
   const conversations = [...(existingConversations || [])];
   const knownUrls = new Set(conversations.map((conversation) => urlKey(conversation.url)).filter(Boolean));
+  const projectKey = (project) => {
+    const categoryId = String(project.categoryId || "uncategorized").trim().toLowerCase();
+    const name = String(project.name || "").trim().toLocaleLowerCase();
+    return `${categoryId}\0${name}`;
+  };
   const projectByName = new Map(
-    projects.map((project) => [String(project.name || "").trim().toLocaleLowerCase(), project]),
+    projects.map((project) => [projectKey(project), project]),
   );
   let nextProjectNumber = 1;
   const projectIds = new Set(projects.map((project) => project.id));
@@ -37,7 +42,7 @@ export function appendGraphData(existingProjects, existingConversations, newProj
     });
     if (!freshLinks.length) continue;
 
-    const nameKey = String(incoming.name || "").trim().toLocaleLowerCase();
+    const nameKey = projectKey(incoming);
     const existing = projectByName.get(nameKey);
     if (existing) {
       existing.links.push(...freshLinks);
@@ -73,6 +78,9 @@ export function moveConversation(projects, sourceProjectId, targetProjectId, url
   const source = projects.find((project) => project.id === sourceProjectId);
   const target = projects.find((project) => project.id === targetProjectId);
   if (!source || !target) throw new Error("Select an existing source and destination project.");
+  if ((source.categoryId || "uncategorized") !== (target.categoryId || "uncategorized")) {
+    throw new Error("Conversations can only be moved between projects in the same category.");
+  }
 
   const linkIndex = source.links.findIndex((link) => link.url === url);
   if (linkIndex < 0) throw new Error("The conversation no longer belongs to the source project.");

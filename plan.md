@@ -352,3 +352,62 @@ Done when the demo script below works without opening DevTools.
 - [ ] Phase 2. Graph page draws those groups and can focus a tab.
 - [ ] Phase 3. An accepted project survives a closed tab group, a click reopens its pages, and it can still be asked about after the tabs are closed, including a “today” timestamp filter.
 - [ ] Phase 4. Push-to-talk runs that same question, the agent can list tabs, search memory, and file links, and a link can be moved to another project.
+
+## Conversation category graph redesign
+
+### Plan
+
+1. Define a broad, stable category taxonomy of at least 100 categories with IDs, display names, and descriptions.
+2. Keep TypeSafe Jev and OpenAI API keys in the local Python service; classify titles with Jev's structured Choice primitive.
+3. Store category metadata in ChromaDB and restrict similarity clustering and OpenAI project assignment to the same category.
+4. Change the graph to show category -> project -> conversation nodes; preserve project editing and limit conversation moves to projects in the same category.
+5. Migrate saved graphs that predate categories, update setup docs, and verify through focused tests.
+
+### Progress
+
+- [x] Created 134 categories, each with a stable ID and classifier description.
+- [x] Integrated TypeSafe Jev (`jev-latest`) for batched fixed-choice title classification. Keys are read from the service environment or `chrome_agent/.env`.
+- [x] Persisted categories with ChromaDB title and project metadata; similarity clustering now only joins titles from the same category.
+- [x] Restricted OpenAI project reuse and naming to category-scoped clusters.
+- [x] Added category parent nodes to both graph views. Projects remain editable, and conversations can only move between projects in the same category.
+- [x] Added first-open migration for saved graphs without category metadata.
+- [x] Updated extension settings and documentation for TypeSafe/OpenAI service checks and the category/project workflow.
+
+### Validation
+
+- [x] Python service unit tests pass, including taxonomy size, category scoping, and TypeSafe Choice request validation.
+- [x] Extension syntax and grouping tests pass.
+- [x] Python compilation and `git diff --check` pass.
+- [x] Live `/typesafe-test` check succeeded with `jev-latest` and returned the expected Programming category.
+
+### Notes
+
+- Only categories with assigned projects appear in the graph; the full taxonomy is used for classification without adding empty nodes.
+- TypeSafe's Choice request supports up to 255 options; the current taxonomy has 134.
+- Existing graphs are reclassified on first side-panel load after this update. Both TypeSafe Jev and OpenAI must be configured for the complete migration.
+
+## Uncategorized data and category-browser fix
+
+### Findings
+
+- The local ChromaDB collection currently contains 479 conversation records, and all 479 have missing category metadata. This indicates old records were never backfilled; it does not by itself indicate poor Jev classification accuracy.
+- Saved graph projects may carry a literal `uncategorized` category ID. The previous migration checked only for a missing ID, so those saved items could bypass reclassification.
+- Clear Graphs previously cleared extension storage only after the backend request succeeded, which prevented clearing the visible graph when the local service was unavailable or stale.
+- The running service on port `8765` returns HTTP 404 for `/categories` and does not report category metadata, confirming it is an older service process and must be restarted before Jev can backfill the records.
+
+### Plan
+
+1. Treat missing, unknown, and legacy category IDs as requiring Jev reclassification.
+2. Load the category taxonomy from the service before validating stored graph categories.
+3. Replace the force graph with an expandable category browser: category click reveals all projects and links; retain inline rename, same-category link move, and semantic search.
+4. Make Clear Graphs always available and remove local graph data before attempting remote Chroma cleanup; report remote cleanup failures separately.
+5. Test the Python endpoints, frontend syntax, graph/category logic, and final diff.
+
+### Progress
+
+- [x] Added the `/categories` endpoint and frontend validation against the canonical category IDs.
+- [x] Existing `uncategorized`, missing, unknown, and legacy projects now trigger graph rebuilding through TypeSafe Jev.
+- [x] Replaced the force graph display with an expandable category browser showing project names and links when a category is opened.
+- [x] Kept project rename, in-category link reassignment, search filtering, and Chroma semantic match highlighting.
+- [x] Made Clear Graphs available when the graph is empty, clear extension storage first, and report a local Chroma cleanup error without restoring the graph.
+- [x] Run final validation. The currently running service was confirmed stale; restarting it with the current app is required for category backfill.

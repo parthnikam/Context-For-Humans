@@ -34,15 +34,27 @@ export function graphModel(state) {
   }
 
   projects.forEach((project, index) => {
+    const categoryId = String(project.categoryId || "uncategorized");
+    const categoryName = String(project.categoryName || "Uncategorized");
+    const categoryNode = addNode({
+      id: `category:${categoryId}`,
+      kind: "category",
+      label: categoryName,
+      categoryId,
+      color: PALETTE[index % PALETTE.length],
+    });
     addNode({
       id: project.id,
       kind: "project",
       label: project.name || "Untitled",
       intent: project.intent || "",
       projectId: project.id,
-      color: PALETTE[index % PALETTE.length],
+      categoryId,
+      categoryName,
+      color: categoryNode.color,
       links: project.links || [],
     });
+    addEdge(`category:${categoryId}`, project.id, "parent");
   });
 
   for (const project of projects) {

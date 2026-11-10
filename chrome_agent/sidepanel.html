@@ -12,7 +12,7 @@
         <p class="eyebrow">Conversation Exporter</p>
         <h1>Project graph</h1>
       </div>
-      <button id="settings-toggle" class="text-button" type="button" aria-expanded="false">AI keys</button>
+      <button id="settings-toggle" class="text-button" type="button" aria-expanded="false">AI settings</button>
     </header>
 
     <details id="settings" class="settings">
@@ -20,19 +20,23 @@
       <div class="service-row">
         <div>
           <strong>Local ChromaDB</strong>
-          <p class="hint">Persistent vector index stored on this computer.</p>
         </div>
         <button id="test-chroma" class="quiet-button" type="button">Test service</button>
       </div>
-      <form id="key-form">
-        <label for="api-key">Google AI Studio API key for Gemma</label>
-        <div class="key-row">
-          <input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key">
-          <button id="test-gemini-key" class="quiet-button" type="button">Test</button>
-          <button type="submit">Save</button>
+      <div class="service-row">
+        <div>
+          <strong>TypeSafe Jev category classifier</strong>
+          <p class="hint">Classifies conversation titles into 134 fixed categories.</p>
         </div>
-        <p class="hint">Gemma compares new clusters with existing project names and titles, then reuses or creates a project. The key is stored locally in this extension.</p>
-      </form>
+        <button id="test-typesafe" class="quiet-button" type="button">Test Jev</button>
+      </div>
+      <div class="service-row">
+        <div>
+          <strong>OpenAI project naming</strong>
+          <p class="hint">Names ChromaDB clusters within each category.</p>
+        </div>
+        <button id="test-openai" class="quiet-button" type="button">Test OpenAI</button>
+      </div>
       <div class="threshold-control">
         <label for="similarity-threshold">Chroma cosine similarity threshold</label>
         <div class="threshold-row">
@@ -69,17 +73,17 @@
         <div class="debug-tools">
           <button id="clear-debug" class="quiet-button" type="button">Clear log</button>
         </div>
-        <pre id="debug-output" class="debug-output" aria-live="polite">ChromaDB and Gemini requests will appear here during grouping.</pre>
+        <pre id="debug-output" class="debug-output" aria-live="polite">ChromaDB clusters, TypeSafe Jev category results, and OpenAI assignment requests will appear here during grouping.</pre>
       </details>
-      <section class="graph-section" aria-label="Conversation project graph">
+      <section class="graph-section" aria-label="Conversation category browser">
         <div class="graph-heading">
-          <h2>Projects and conversations</h2>
+          <h2>Categories</h2>
           <span id="counts" class="counts">No data</span>
           <a id="view-larger" class="text-button" href="graph.html" target="_blank" rel="noopener" aria-disabled="true">View larger</a>
           <button id="download" class="text-button" type="button" disabled>Download CSV</button>
           <button id="clear-graphs" class="text-button danger-button" type="button" disabled>Clear graphs</button>
         </div>
-        <div id="graph" class="graph"></div>
+        <div id="graph" class="graph" aria-label="Project graph. Search by title words or meaning to highlight similar conversations."></div>
         <div id="project-detail" class="graph-detail" hidden></div>
       </section>
     </main>
