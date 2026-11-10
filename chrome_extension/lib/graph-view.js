@@ -1,8 +1,7 @@
 ﻿import { mountGraph } from "./graph-force.js";
 import { fillGraphDetail } from "./graph-detail.js";
-import { graphModel } from "./graph-model.js";
+import { graphModel, unassignedConversations } from "./graph-model.js";
 import { providerLogo } from "./provider-logos.js";
-import { searchUrlKey } from "./url.js";
 
 const mountedGraphs = new WeakMap();
 const categoryExpansion = new WeakMap();
@@ -13,7 +12,7 @@ const VIEW_ICONS = {
   graph: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M4.3 4.5 11.6 6M4.3 4.5 6 11.9M11.6 6 6 11.9"/><circle cx="4" cy="4" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="5.7" r="2" fill="currentColor" stroke="none"/><circle cx="5.8" cy="12.1" r="2" fill="currentColor" stroke="none"/></svg>',
 };
 
-export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit, graphOptions = {}) {
+export function renderGraph(host, projects, detailHost, onOpen, onEdit, graphOptions = {}) {
   const previous = mountedGraphs.get(host);
   previous?.destroy();
   host.replaceChildren();
@@ -31,7 +30,7 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
   const find = document.createElement("input");
   find.className = "graph-find";
   find.type = "search";
-  find.placeholder = "Search projects or conversations by meaning";
+  find.placeholder = "Search projects or conversations by text";
   find.setAttribute("aria-label", "Search categories, projects, and conversation titles");
   toolbar.append(toggle, find);
   const results = document.createElement("div");
@@ -44,9 +43,6 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
 
   const openCategories = categoryExpansion.get(host) || new Set();
   categoryExpansion.set(host, openCategories);
-  let semanticMatches = new Set();
-  let searchTimer = 0;
-  let searchSequence = 0;
   let mode = viewModes.get(host) === "graph" ? "graph" : "list";
   let graphHandle = null;
 
@@ -56,7 +52,6 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
     graphHandle?.destroy();
     graphHandle = mountGraph(stage, mountedModel, {
       getQuery: () => find.value.trim(),
-      getSemanticMatches: () => semanticMatches,
       onSelect: (node) => {
         if (!node) {
           detailHost.hidden = true;
@@ -93,6 +88,7 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
   function drawCategories(query = find.value.trim().toLowerCase()) {
     results.replaceChildren();
     const categories = new Map();
+    const unassigned = unassignedConversations(projects, graphOptions.conversations);
     for (const project of projects) {
       const id = String(project.categoryId || "uncategorized");
       const name = String(project.categoryName || (id === "uncategorized" ? "Needs category repair" : id));
@@ -102,30 +98,30 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
     }
 
     const ordered = [...categories.values()].sort((left, right) => left.name.localeCompare(right.name));
-    if (!ordered.length) {
+    const matchingUnassigned = unassigned.filter((conversation) => (
+      !query
+      || String(conversation.title || "").toLowerCase().includes(query)
+    ));
+    if (!ordered.length && !matchingUnassigned.length) {
       const empty = document.createElement("p");
       empty.className = "empty-graph";
-      empty.textContent = "Import conversations to build your category list.";
+      empty.textContent = unassigned.length
+        ? "No unassigned conversations match that search."
+        : "Import conversations to build your category list.";
       results.append(empty);
       return;
     }
 
     let visibleCategoryCount = 0;
     for (const category of ordered) {
-      const categoryHasSemanticMatch = category.projects.some((project) =>
-        (project.links || []).some((link) => semanticMatches.has(searchUrlKey(link.url)))
-      );
       const matchingProjects = category.projects.filter((project) => {
         if (!query) return true;
         return category.name.toLowerCase().includes(query)
           || String(project.name || "").toLowerCase().includes(query)
           || String(project.intent || "").toLowerCase().includes(query)
-          || (project.links || []).some((link) => (
-            String(link.title || "").toLowerCase().includes(query)
-            || semanticMatches.has(searchUrlKey(link.url))
-          ));
+          || (project.links || []).some((link) => String(link.title || "").toLowerCase().includes(query));
       });
-      if (!matchingProjects.length && query && !categoryHasSemanticMatch) continue;
+      if (!matchingProjects.length && query) continue;
 
       visibleCategoryCount += 1;
       const section = document.createElement("details");
@@ -173,15 +169,13 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
           return category.name.toLowerCase().includes(query)
             || String(project.name || "").toLowerCase().includes(query)
             || String(project.intent || "").toLowerCase().includes(query)
-            || String(link.title || "").toLowerCase().includes(query)
-            || semanticMatches.has(searchUrlKey(link.url));
+            || String(link.title || "").toLowerCase().includes(query);
         });
         const linkList = document.createElement("ul");
         linkList.className = "category-links";
         for (const link of links) {
           const row = document.createElement("li");
           row.className = "category-link-row";
-          if (semanticMatches.has(searchUrlKey(link.url))) row.classList.add("semantic-match");
           const anchor = document.createElement("a");
           anchor.className = "category-link";
           anchor.href = link.url;
@@ -228,51 +222,74 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
       results.append(section);
     }
 
+    if (matchingUnassigned.length) {
+      const section = document.createElement("details");
+      section.className = "category-item unassigned-category";
+      section.open = openCategories.has("unassigned-conversations")
+        || Boolean(query && matchingUnassigned.length);
+      section.addEventListener("toggle", () => {
+        if (section.open) openCategories.add("unassigned-conversations");
+        else openCategories.delete("unassigned-conversations");
+      });
+
+      const summary = document.createElement("summary");
+      summary.className = "category-summary";
+      const name = document.createElement("span");
+      name.className = "category-name";
+      name.textContent = "Unassigned conversations";
+      const count = document.createElement("span");
+      count.className = "category-count";
+      count.textContent = `${matchingUnassigned.length} conversation(s)`;
+      summary.append(name, count);
+      section.append(summary);
+
+      const linkList = document.createElement("ul");
+      linkList.className = "category-links";
+      for (const conversation of matchingUnassigned) {
+        const row = document.createElement("li");
+        row.className = "category-link-row";
+        const anchor = document.createElement("a");
+        anchor.className = "category-link";
+        anchor.href = conversation.url;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.textContent = conversation.title || conversation.url;
+        anchor.title = conversation.url;
+        anchor.addEventListener("click", (event) => {
+          event.preventDefault();
+          onOpen?.({
+            kind: "link",
+            label: conversation.title || conversation.url,
+            url: conversation.url,
+          });
+        });
+        const logo = providerLogo(conversation.url);
+        if (logo) row.append(logo);
+        row.append(anchor);
+        linkList.append(row);
+      }
+      section.append(linkList);
+      results.append(section);
+    }
+
     if (query && !visibleCategoryCount) {
-      const empty = document.createElement("p");
-      empty.className = "empty-graph";
-      empty.textContent = "No category or conversation matches that search.";
-      results.append(empty);
+      if (!matchingUnassigned.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty-graph";
+        empty.textContent = "No category or conversation matches that search.";
+        results.append(empty);
+      }
     }
   }
 
   drawCategories();
   setMode(mode);
   find.addEventListener("input", () => {
-    semanticMatches = new Set();
     drawCategories();
     graphHandle?.redraw();
-    window.clearTimeout(searchTimer);
-    const sequence = ++searchSequence;
-    const query = find.value.trim();
-    if (query.length < 2 || typeof graphOptions.search !== "function") {
-      return;
-    }
-    searchTimer = window.setTimeout(async () => {
-      try {
-        const result = await graphOptions.search(query);
-        if (sequence !== searchSequence) return;
-        semanticMatches = new Set((Array.isArray(result.matches) ? result.matches : [])
-          .map((item) => searchUrlKey(item.url))
-          .filter(Boolean));
-        drawCategories();
-        graphHandle?.redraw();
-        graphHandle?.focusSearch();
-        onStatus?.(semanticMatches.size
-          ? `Found ${semanticMatches.size} semantically similar conversation(s).`
-          : "No semantic matches found in the saved conversations.");
-      } catch (error) {
-        if (sequence !== searchSequence) return;
-        drawCategories();
-        graphHandle?.redraw();
-        onStatus?.(`Similarity search unavailable: ${error.message}`);
-      }
-    }, 300);
   });
   mountedGraphs.set(host, {
     destroy() {
-      window.clearTimeout(searchTimer);
-      searchSequence += 1;
       graphHandle?.destroy();
       graphHandle = null;
     },

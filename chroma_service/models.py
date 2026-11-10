@@ -17,6 +17,10 @@ class ClusterRequest(BaseModel):
     similarity_threshold: float = Field(default=0.62, ge=0, le=1)
 
 
+class ExistingConversationsRequest(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=2000)
+
+
 class Assignment(BaseModel):
     url: str = Field(min_length=1, max_length=4096)
     title: str = Field(min_length=1, max_length=1000)

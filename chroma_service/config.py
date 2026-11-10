@@ -41,7 +41,7 @@ def _load_env_key(name: str) -> str:
     key = os.environ.get(name, "").strip()
     if key:
         return key
-    env_path = SERVICE_DIR.parent / "chrome_agent" / ".env"
+    env_path = SERVICE_DIR.parent / "chrome_extension" / ".env"
     if not env_path.is_file():
         return ""
     try:

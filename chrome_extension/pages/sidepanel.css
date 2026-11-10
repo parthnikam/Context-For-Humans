@@ -101,6 +101,7 @@ body.panel-large {
 
 body.panel-large .top,
 body.panel-large .panel-tabs,
+body.panel-large .import-progress,
 body.panel-large main {
   max-width: 1040px;
   width: 100%;
@@ -429,6 +430,12 @@ select {
   flex-wrap: wrap;
 }
 
+.category-hint {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .graph {
   position: relative;
   flex: 1;
@@ -663,6 +670,36 @@ select {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
+}
+
+.import-progress {
+  height: 2px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.import-progress span {
+  display: block;
+  width: 28%;
+  height: 100%;
+  background: var(--accent);
+  animation: import-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes import-progress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .import-progress span {
+    width: 100%;
+    animation: none;
+  }
 }
 
 .view-toggle-button svg {

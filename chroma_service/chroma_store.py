@@ -49,6 +49,19 @@ def get_stored_metadata(record_ids: list[str]) -> dict[str, dict[str, Any]]:
     }
 
 
+def get_existing_urls(urls: list[str]) -> list[str]:
+    """Return submitted URLs whose normalized identities are already indexed."""
+    ids_by_url = {
+        url: record_id(normalize_url(url))
+        for url in urls
+        if normalize_url(url)
+    }
+    if not ids_by_url:
+        return []
+    stored_ids = set(get_stored_metadata(list(set(ids_by_url.values()))))
+    return [url for url, item_id in ids_by_url.items() if item_id in stored_ids]
+
+
 def index_and_query(
     unique: list[Conversation],
     record_ids: list[str],

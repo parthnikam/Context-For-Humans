@@ -366,7 +366,7 @@ Done when the demo script below works without opening DevTools.
 ### Progress
 
 - [x] Created 134 categories, each with a stable ID and classifier description.
-- [x] Integrated TypeSafe Jev (`jev-latest`) for batched fixed-choice title classification. Keys are read from the service environment or `chrome_agent/.env`.
+- [x] Integrated TypeSafe Jev (`jev-latest`) for batched fixed-choice title classification. Keys are read from the service environment or `chrome_extension/.env`.
 - [x] Persisted categories with ChromaDB title and project metadata; similarity clustering now only joins titles from the same category.
 - [x] Restricted OpenAI project reuse and naming to category-scoped clusters.
 - [x] Added category parent nodes to both graph views. Projects remain editable, and conversations can only move between projects in the same category.
@@ -393,7 +393,7 @@ Done when the demo script below works without opening DevTools.
 - The local ChromaDB collection currently contains 479 conversation records, and all 479 have missing category metadata. This indicates old records were never backfilled; it does not by itself indicate poor Jev classification accuracy.
 - Saved graph projects may carry a literal `uncategorized` category ID. The previous migration checked only for a missing ID, so those saved items could bypass reclassification.
 - Clear Graphs previously cleared extension storage only after the backend request succeeded, which prevented clearing the visible graph when the local service was unavailable or stale.
-- The running service on port `8765` returns HTTP 404 for `/categories` and does not report category metadata, confirming it is an older service process and must be restarted before Jev can backfill the records.
+- The running service on port `8760` returns HTTP 404 for `/categories` and does not report category metadata, confirming it is an older service process and must be restarted before Jev can backfill the records.
 - The running service advertises `POST /clear`, while the extension sent `DELETE /clear`; the resulting 405 explains why ChromaDB data survived the graph clear.
 
 ### Plan

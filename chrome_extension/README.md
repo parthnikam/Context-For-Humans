@@ -6,7 +6,7 @@ A Manifest V3 Chrome extension that scrolls a selected chat list or imports a CS
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
-3. Select **Load unpacked** and choose this `chrome_agent` folder. Use Chrome 114 or newer for the side-panel API. The extension requests access to all sites so it can scroll and read conversation links from any chat page; reload it in `chrome://extensions` after changing the manifest.
+3. Select **Load unpacked** and choose this `chrome_extension` folder. Use Chrome 114 or newer for the side-panel API. The extension requests access to all sites so it can scroll and read conversation links from any chat page; reload it in `chrome://extensions` after changing the manifest.
 4. Open the chat page and select the extension toolbar button to open the side panel. If the extension was already installed, select **Reload** for it in `chrome://extensions` first.
 
 ## Start the local ChromaDB service
@@ -15,14 +15,14 @@ The extension cannot host an embedded Python database itself. From the repositor
 
 ```powershell
 python -m pip install -r chroma_service/requirements.txt
-python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8765
+python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8760
 ```
 
 Keep that terminal open while using the extension. The first indexing request may download ChromaDB's default sentence embedding model. Chroma persists its collection under `chroma_service/data/`; it remains available across extension reloads and CSV imports. The service binds only to localhost and accepts browser requests from Chrome extension origins.
 
 ## Configure TypeSafe, OpenAI, and Mem0
 
-Put the API keys in `chrome_agent/.env`:
+Put the API keys in `chrome_extension/.env`:
 
 ```text
 TYPESAFE_API_KEY=your-typesafe-key
@@ -39,9 +39,9 @@ The side panel has three tabs. **Conversations** holds the Ask bar at the top an
 1. Start the local service, then open the **Import** tab and select **Test service**, **Test Jev**, **Test OpenAI**, and **Test Mem0**.
 2. To extract from a chat page, select **Detect chat list**.
 3. Choose the sidebar or list that contains the conversations. The selected area is outlined on the page.
-4. Select **Extract & group**. The extension scrolls through the list, waits for lazy-loaded items, and groups collected link titles and URLs. After three bottom nudges produce no new links, it stops. A new link resets the counter. Select **Cancel** to stop early.
+4. Select **Extract & group**. The extension scrolls through the list, waits for lazy-loaded items, and groups collected link titles and URLs. It checks URLs against ChromaDB first and skips conversations that are already indexed. After three bottom nudges produce no new links, it stops. A new link resets the counter. Select **Cancel** to stop early.
 5. Or select **Import title,url CSV** to group conversations from a CSV. The header must contain `title` and `url` columns; `conversation_title` is also accepted.
-6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**: a live d3-force simulation of every category, project, and conversation, with vibrant per-category colors. Zoomed out only the categories are crisp; zoom in and the projects, then conversation links, pull into focus from a soft blur. Drag nodes and the physics re-settles; hover to highlight a neighborhood; click a node for details; double-click to open it; pan and scroll to zoom. Use the search field to filter by words or meaning in either view; ChromaDB semantic matches are highlighted with a ring.
+6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**: a live d3-force simulation of every category, project, and conversation, with vibrant per-category colors. Zoomed out only the categories are crisp; zoom in and the projects, then conversation links, pull into focus from a soft blur. Drag nodes and the physics re-settles; hover to highlight a neighborhood; click a node for details; double-click to open it; pan and scroll to zoom. Use the search field to filter category, project, and conversation text in either view.
 7. Use **Ask** at the top of the Conversations tab to ask questions about your projects ("what was I working on with React?"). A `gpt-5.6-luna` agent decides which tools to call: `search_memory` (Mem0) and `search_conversations` (ChromaDB semantic search over filed titles). It answers only from what the tools find, links the source conversations under the answer, and replies "oops. i don't have that in my memory" when nothing matches. Filing or importing conversations stores each project in Mem0 automatically.
 8. On the **Projects** tab, press **Group my tabs**. Tabs whose URLs match a filed project join that project's Chrome tab group; the rest are clustered into trails by `gpt-5.6-luna` (same grouping rules as the original Context For Humans tab grouper) and grouped in Chrome with a name and one-liner. The trails are then **auto-accepted**: each one is filed through the full conversation pipeline — Jev categorizes the links, ChromaDB clusters them, the project keeps the trail's name, and Mem0 remembers it — with no extra clicks. (If the filing pipeline fails, the trails fall back to suggestion cards you can Accept manually.) Click a filed project name to reopen its links in a Chrome tab group.
 9. Below the projects browser, the **Chrome tab groups** section lists your live URL tab groups (with their color swatches) and any ungrouped tabs. The projects graph inside the Projects tab renders every filed project, its links, and any open suggestions in the live d3-force graph (vibrant colors, hover focus, drag, pan, zoom; suggestions appear as dashed rings). Double-click a project node to reopen its tabs. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
@@ -61,7 +61,7 @@ Each conversation link shows its provider's logo beside the title in list view a
 The code is organized into folders by responsibility:
 
 ```text
-chrome_agent/
+chrome_extension/
   manifest.json          Extension manifest (paths point into the folders below)
   background/            Service worker that opens the side panel
   pages/                 Side panel and the larger graph page (HTML, CSS, JS)

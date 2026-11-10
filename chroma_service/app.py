@@ -1,6 +1,6 @@
 """FastAPI application: thin routes over the config, clients, store, and pipeline.
 
-Run with: python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8765
+Run with: python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8760
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from chroma_service.models import (
     AskRequest,
     AssignmentRequest,
     ClusterRequest,
+    ExistingConversationsRequest,
     ProjectAssignmentRequest,
     SearchRequest,
     TabClusterRequest,
@@ -60,7 +61,7 @@ def test_typesafe() -> dict:
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="TYPESAFE_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="TYPESAFE_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
     categories = classify_titles_with_typesafe(["A question about writing Python code."], api_key)
     return {
@@ -94,6 +95,11 @@ def cluster_titles(request: ClusterRequest) -> dict:
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/existing-conversations")
+def existing_conversations(request: ExistingConversationsRequest) -> dict:
+    return {"existing_urls": chroma_store.get_existing_urls(request.urls)}
 
 
 @app.post("/cluster-tabs")

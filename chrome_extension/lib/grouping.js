@@ -1,4 +1,4 @@
-export const DEFAULT_CHROMA_SERVICE_URL = "http://127.0.0.1:8765";
+export const DEFAULT_CHROMA_SERVICE_URL = "http://127.0.0.1:8760";
 export const DEFAULT_SIMILARITY_THRESHOLD = 0.62;
 const MAX_ASSIGNMENT_BATCH_SIZE = 25;
 
@@ -132,6 +132,17 @@ export async function syncProjectAssignments(assignments, options = {}) {
     body: { assignments },
     service: "ChromaDB",
     stage: "Save project assignments",
+  });
+}
+
+export async function findExistingConversations(urls, options = {}) {
+  if (!urls.length) return { existing_urls: [] };
+  return requestJson("/existing-conversations", {
+    ...options,
+    method: "POST",
+    body: { urls },
+    service: "ChromaDB",
+    stage: "Check existing conversations",
   });
 }
 

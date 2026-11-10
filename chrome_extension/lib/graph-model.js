@@ -78,3 +78,18 @@ export function graphModel(state) {
 
   return { nodes, edges };
 }
+
+export function unassignedConversations(projects, conversations) {
+  const assignedUrls = new Set(
+    (projects || []).flatMap((project) =>
+      (project?.links || []).map((link) => pageKey(link?.url)).filter(Boolean)
+    ),
+  );
+  const seenUrls = new Set();
+  return (conversations || []).filter((conversation) => {
+    const key = pageKey(conversation?.url);
+    if (!key || assignedUrls.has(key) || seenUrls.has(key)) return false;
+    seenUrls.add(key);
+    return true;
+  });
+}

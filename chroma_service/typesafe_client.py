@@ -31,7 +31,7 @@ def classify_titles_with_typesafe(
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="TYPESAFE_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="TYPESAFE_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
     batches = [
         (start, titles[start:start + TYPESAFE_CLASSIFICATION_BATCH_SIZE])

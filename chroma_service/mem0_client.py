@@ -20,7 +20,7 @@ def test_mem0_connection() -> dict[str, bool]:
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="MEM0_API_KEY (or MEMO_API_KEY) was not found in the service environment or chrome_agent/.env.",
+            detail="MEM0_API_KEY (or MEMO_API_KEY) was not found in the service environment or chrome_extension/.env.",
         )
     try:
         response = requests.get(

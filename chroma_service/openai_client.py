@@ -45,7 +45,7 @@ def test_openai_connection() -> dict[str, str | bool]:
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OPENAI_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="OPENAI_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
     try:
         response = requests.post(
@@ -78,7 +78,7 @@ def assign_projects_with_openai(request: ProjectAssignmentRequest) -> dict[str, 
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OPENAI_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="OPENAI_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
 
     existing_ids = {
@@ -389,7 +389,7 @@ def cluster_tabs(request: TabClusterRequest) -> dict[str, Any]:
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OPENAI_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="OPENAI_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
     try:
         response = requests.post(

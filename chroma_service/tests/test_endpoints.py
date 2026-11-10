@@ -67,6 +67,17 @@ class EndpointTests(unittest.TestCase):
         remember.assert_called_once()
         self.assertEqual(len(remember.call_args.args[0]), 1)
 
+    def test_existing_conversations_route_checks_database(self):
+        request = service.ExistingConversationsRequest(urls=["https://example.test/chat"])
+        with patch.object(
+            service.chroma_store,
+            "get_existing_urls",
+            return_value=["https://example.test/chat"],
+        ) as existing:
+            result = service.existing_conversations(request)
+        self.assertEqual(result, {"existing_urls": ["https://example.test/chat"]})
+        existing.assert_called_once_with(["https://example.test/chat"])
+
 
 if __name__ == "__main__":
     unittest.main()

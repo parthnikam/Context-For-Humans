@@ -5,6 +5,7 @@ import {
   clearChromaIndex,
   clusterOpenTabs,
   DEFAULT_SIMILARITY_THRESHOLD,
+  findExistingConversations,
   groupConversations,
   listCategories,
   searchTitles,
@@ -206,7 +207,7 @@ async function initialize() {
           const categoryIds = new Set((taxonomy.categories || []).map((item) => item.id));
           if (!projects.length || projects.some((project) => !categoryIds.has(String(project.categoryId || "")))) {
             setStatus("Repairing missing or outdated categories with TypeSafe Jev...");
-            setBusy(true);
+            setBusy(true, "Repairing conversation categories");
             migrationPromise = migrateLegacyGraph(stored[SIMILARITY_THRESHOLD_KEY], categoryIds);
             try {
               await migrationPromise;
@@ -368,7 +369,7 @@ async function saveSimilarityThreshold() {
 }
 
 async function detectAreas() {
-  setBusy(true);
+  setBusy(true, "Scanning active page");
   areas = [];
   areaSelect.disabled = true;
   areaSelect.replaceChildren(new Option("Scanning active page...", ""));
@@ -417,7 +418,7 @@ async function selectArea() {
 async function extractAndGroup() {
   const area = getSelectedArea();
   if (!area || busy) return;
-  setBusy(true);
+  setBusy(true, "Importing conversations");
   cancelled = false;
   cancelButton.hidden = false;
   try {
@@ -451,7 +452,7 @@ async function importCsv() {
     csvInput.value = "";
     return;
   }
-  setBusy(true);
+  setBusy(true, "Importing conversations");
   try {
     const entries = parseConversationCsv(await file.text());
     await groupAndShow(entries, file.name);
@@ -472,17 +473,28 @@ async function groupAndShow(entries, source, { stay = false, origin = "conversat
     return;
   }
 
+  const existingResult = await findExistingConversations(
+    newEntries.map((entry) => entry.url),
+    { onDebug: appendDebug },
+  );
+  const existingUrls = new Set((existingResult.existing_urls || []).map(urlKey));
+  const freshEntries = newEntries.filter((entry) => !existingUrls.has(urlKey(entry.url)));
+  if (!freshEntries.length) {
+    setStatus("No new conversations to add; every URL is already indexed in ChromaDB.");
+    return;
+  }
+
   const stored = await chrome.storage.local.get([SIMILARITY_THRESHOLD_KEY]);
   const previousIds = new Set(projects.map((project) => project.id));
 
   const grouped = await groupConversations({
-    conversations: newEntries,
+    conversations: freshEntries,
     existingProjects: projects,
     similarityThreshold: readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]),
     onStatus: setStatus,
     onDebug: appendDebug,
   });
-  const appended = appendGraphData(projects, conversations, grouped, newEntries);
+  const appended = appendGraphData(projects, conversations, grouped, freshEntries);
   const taggedProjects = appended.projects.map((project) => (
     previousIds.has(project.id) || project.origin ? project : { ...project, origin }
   ));
@@ -494,7 +506,7 @@ async function groupAndShow(entries, source, { stay = false, origin = "conversat
   projects = taggedProjects;
   graphSource = nextSource;
   try {
-    await syncProjectAssignments(assignmentsForUrls(newEntries.map((entry) => entry.url)), {
+    await syncProjectAssignments(assignmentsForUrls(freshEntries.map((entry) => entry.url)), {
       onDebug: appendDebug,
     });
   } catch (error) {
@@ -510,7 +522,9 @@ async function groupAndShow(entries, source, { stay = false, origin = "conversat
   }
   render();
   if (!stay) selectPanelTab("conversations");
-  setStatus(`Added ${newEntries.length} conversation(s); graph now has ${projects.length} project(s) and ${conversations.length} conversation(s).`);
+  setStatus(grouped.length
+    ? `Added ${freshEntries.length} conversation(s)${newEntries.length > freshEntries.length ? `; skipped ${newEntries.length - freshEntries.length} already indexed` : ""}; graph now has ${projects.length} project(s) and ${conversations.length} conversation(s).`
+    : `Added ${freshEntries.length} conversation(s), but no projects were returned. They are available under Unassigned conversations.`);
 }
 
 function tabProjects() {
@@ -608,11 +622,10 @@ function render() {
     graph,
     projects,
     detail,
-    setStatus,
     (node) => openGraphNode(node, projects, setStatus),
     editGraph,
     {
-      search: (query) => searchTitles(query, { onDebug: appendDebug }),
+      conversations,
     },
   );
   const projectCount = projects.length;
@@ -679,7 +692,7 @@ async function groupMyTabs(button) {
         });
         warning = `Could not cluster ${loose.length} loose tab(s): ${error.message}`;
         if (!groups.length) {
-          throw new Error(`${warning} Is the local ChromaDB service running the latest code? Restart it (python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8765).`);
+          throw new Error(`${warning} Is the local ChromaDB service running the latest code? Restart it (python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8760).`);
         }
       }
     }
@@ -1192,8 +1205,11 @@ function getSelectedArea() {
   return areaSelect.value === "" ? null : areas[Number(areaSelect.value)] || null;
 }
 
-function setBusy(next) {
+function setBusy(next, activity = "Working") {
   busy = next;
+  const progress = document.querySelector("#import-progress");
+  progress.hidden = !next;
+  progress.setAttribute("aria-label", activity);
   scanButton.disabled = next;
   csvInput.disabled = next;
   areaSelect.disabled = next || areas.length === 0;

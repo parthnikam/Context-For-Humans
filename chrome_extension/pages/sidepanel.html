@@ -24,6 +24,10 @@
       </button>
     </nav>
 
+    <div id="import-progress" class="import-progress" role="progressbar" aria-label="Importing conversations" aria-valuetext="In progress" hidden>
+      <span></span>
+    </div>
+
     <main>
       <p id="status" class="status" role="status" aria-live="polite">Import a CSV or detect a chat list to begin.</p>
 
@@ -39,10 +43,11 @@
           <div class="graph-heading">
             <h2>Categories</h2>
             <span id="counts" class="counts">No data</span>
+            <span class="category-hint">Select a category to view its projects and conversations.</span>
             <button id="download" class="text-button" type="button" disabled>Download CSV</button>
             <button id="clear-graphs" class="text-button danger-button" type="button" disabled>Clear graphs</button>
           </div>
-          <div id="graph" class="graph" aria-label="Project graph. Search by title words or meaning to highlight similar conversations."></div>
+          <div id="graph" class="graph" aria-label="Project graph. Search by text to highlight matching projects and conversations."></div>
           <div id="project-detail" class="graph-detail" hidden></div>
         </section>
       </div>

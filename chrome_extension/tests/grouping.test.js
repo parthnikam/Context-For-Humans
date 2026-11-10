@@ -3,6 +3,7 @@ import {
   askQuestion,
   clearChromaIndex,
   clusterOpenTabs,
+  findExistingConversations,
   groupConversations,
   listCategories,
   searchTitles,
@@ -121,6 +122,9 @@ const fakeFetch = async (url, init = {}) => {
       ],
     });
   }
+  if (parsedUrl.pathname === "/existing-conversations") {
+    return jsonResponse({ existing_urls: body.urls.filter((url) => url === "https://provider-a.test/1") });
+  }
   if (parsedUrl.pathname === "/assign-projects") {
     assert.match(JSON.stringify(body.existing_projects), /React project/);
     assert.match(JSON.stringify(body.existing_projects), /React state patterns/);
@@ -192,6 +196,12 @@ assert.deepEqual(await searchTitles("react components", {
     project_id: "project-react",
     similarity: 0.82,
   }],
+});
+assert.deepEqual(await findExistingConversations([
+  "https://provider-a.test/1",
+  "https://provider-b.test/2",
+], { fetch: fakeFetch }), {
+  existing_urls: ["https://provider-a.test/1"],
 });
 
 const projects = await groupConversations({

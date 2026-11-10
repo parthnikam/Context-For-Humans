@@ -1,7 +1,6 @@
 import { renderGraph } from "../lib/graph-view.js";
 import { openGraphNode } from "../lib/graph-actions.js";
 import { moveConversation } from "../lib/graph-state.js";
-import { searchTitles } from "../lib/grouping.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const graph = document.querySelector("#graph");
@@ -20,7 +19,7 @@ async function loadGraph() {
     const stored = await chrome.storage.local.get(STORAGE_KEY);
     const saved = stored[STORAGE_KEY];
     if (!saved || !Array.isArray(saved.projects) || !Array.isArray(saved.conversations)) {
-      renderGraph(graph, [], detail, setStatus, () => {}, () => {});
+      renderGraph(graph, [], detail, () => {}, () => {});
       counts.textContent = "No data";
       setStatus("Import a CSV or extract conversations from the side panel to build a graph.");
       return;
@@ -30,10 +29,9 @@ async function loadGraph() {
       graph,
       saved.projects,
       detail,
-      setStatus,
       (node) => openGraphNode(node, saved.projects, setStatus),
       (change) => editSavedGraph(saved, change),
-      { search: (query) => searchTitles(query) },
+      { conversations: saved.conversations },
     );
     counts.textContent = `${saved.projects.length} project(s) · ${saved.conversations.length} conversation(s)`;
     setStatus(saved.source ? `Source: ${saved.source}` : "Saved graph");

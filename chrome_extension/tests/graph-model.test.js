@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { graphModel } from "../lib/graph-model.js";
+import { graphModel, unassignedConversations } from "../lib/graph-model.js";
 
 const model = graphModel({
   projects: [
@@ -36,5 +36,16 @@ assert.equal(links.length, 3);
 assert.equal(model.edges.filter((edge) => edge.kind === "parent").length, 3);
 assert.equal(model.edges.filter((edge) => edge.kind === "link").length, 3);
 assert.equal(categories.find((node) => node.categoryId === "programming").label, "Programming");
+
+const savedConversations = [
+  { title: "React hooks", url: "https://example.test/react#saved-fragment" },
+  { title: "Conversation without a project", url: "https://example.test/unassigned" },
+  { title: "Duplicate unassigned URL", url: "https://example.test/unassigned#duplicate-fragment" },
+  { title: "Invalid record", url: "" },
+];
+assert.deepEqual(
+  unassignedConversations(model.nodes.filter((node) => node.kind === "project"), savedConversations),
+  [savedConversations[1]],
+);
 
 console.log("Category -> project -> conversation graph model checks passed.");

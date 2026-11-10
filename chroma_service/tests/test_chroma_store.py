@@ -67,6 +67,16 @@ class ChromaStoreTests(unittest.TestCase):
         self.assertGreaterEqual(matches[0]["similarity"], matches[1]["similarity"])
         self.assertEqual(len(chroma_store.search_matches("react", 1)), 1)
 
+    def test_existing_url_lookup_ignores_fragments_and_returns_original_input(self):
+        self.index([("react hooks tutorial", "https://example.test/react")])
+
+        existing = chroma_store.get_existing_urls([
+            "https://example.test/react#chat",
+            "https://example.test/new",
+        ])
+
+        self.assertEqual(existing, ["https://example.test/react#chat"])
+
     def test_clear_recreates_the_empty_collection(self):
         fake_client = Mock()
         replacement_collection = FakeCollection()

@@ -80,7 +80,7 @@ def answer_question(question: str, user_id: str | None = None) -> dict[str, Any]
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="OPENAI_API_KEY was not found in the service environment or chrome_agent/.env.",
+            detail="OPENAI_API_KEY was not found in the service environment or chrome_extension/.env.",
         )
     messages = [
         {"role": "system", "content": build_agent_prompt()},
