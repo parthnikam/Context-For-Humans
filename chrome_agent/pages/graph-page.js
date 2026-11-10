@@ -1,7 +1,7 @@
-import { renderGraph } from "./graph-view.js";
-import { openGraphNode } from "./graph-actions.js";
-import { moveConversation, renameProject } from "./graph-state.js";
-import { searchTitles } from "./grouping.js";
+import { renderGraph } from "../lib/graph-view.js";
+import { openGraphNode } from "../lib/graph-actions.js";
+import { moveConversation } from "../lib/graph-state.js";
+import { searchTitles } from "../lib/grouping.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const graph = document.querySelector("#graph");
@@ -44,20 +44,14 @@ async function loadGraph() {
 
 async function editSavedGraph(saved, change) {
   try {
-    let updatedProjects;
-    if (change.type === "rename") {
-      updatedProjects = renameProject(saved.projects, change.projectId, change.name);
-    } else if (change.type === "move") {
-      updatedProjects = moveConversation(saved.projects, change.projectId, change.targetProjectId, change.url);
-    } else {
+    if (change.type !== "move") {
       throw new Error("Unknown graph edit.");
     }
+    const updatedProjects = moveConversation(saved.projects, change.projectId, change.targetProjectId, change.url);
     await chrome.storage.local.set({
       [STORAGE_KEY]: { ...saved, projects: updatedProjects, savedAt: new Date().toISOString() },
     });
-    setStatus(change.type === "rename"
-      ? "Project renamed."
-      : "Conversation moved to the selected project.");
+    setStatus("Conversation moved to the selected project.");
   } catch (error) {
     setStatus(`Could not update project graph: ${error.message}`);
   }

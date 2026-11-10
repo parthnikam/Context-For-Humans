@@ -106,7 +106,7 @@ export async function syncProjectAssignments(assignments, options = {}) {
 export async function clearChromaIndex(options = {}) {
   return requestJson("/clear", {
     ...options,
-    method: "DELETE",
+    method: "POST",
     service: "ChromaDB",
     stage: "Clear index",
   });

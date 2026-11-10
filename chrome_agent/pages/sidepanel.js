@@ -1,5 +1,5 @@
-import { parseConversationCsv } from "./csv.js";
-import { extractConversations } from "./extraction.js";
+import { parseConversationCsv } from "../lib/csv.js";
+import { extractConversations } from "../lib/extraction.js";
 import {
   clearChromaIndex,
   DEFAULT_SIMILARITY_THRESHOLD,
@@ -10,12 +10,12 @@ import {
   testOpenAIService,
   testTypeSafeService,
   testChromaService,
-} from "./grouping.js";
-import { openGraphNode } from "./graph-actions.js";
-import { renderGraph } from "./graph-view.js";
-import { appendGraphData, moveConversation, renameProject } from "./graph-state.js";
-import { runPageAction } from "./page-actions.js";
-import { createCsvDownload } from "./csv-download.js";
+} from "../lib/grouping.js";
+import { openGraphNode } from "../lib/graph-actions.js";
+import { renderGraph } from "../lib/graph-view.js";
+import { appendGraphData, moveConversation } from "../lib/graph-state.js";
+import { runPageAction } from "../lib/page-actions.js";
+import { createCsvDownload } from "../lib/csv-download.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const LEGACY_MEM0_KEY = "conversationMem0ApiKey";
@@ -350,22 +350,15 @@ async function clearGraphs() {
 
 async function editGraph(change) {
   try {
-    let updatedProjects;
-    if (change.type === "rename") {
-      updatedProjects = renameProject(projects, change.projectId, change.name);
-    } else if (change.type === "move") {
-      updatedProjects = moveConversation(projects, change.projectId, change.targetProjectId, change.url);
-    } else {
+    if (change.type !== "move") {
       throw new Error("Unknown graph edit.");
     }
+    const updatedProjects = moveConversation(projects, change.projectId, change.targetProjectId, change.url);
     await persistGraph(updatedProjects, conversations, graphSource);
     projects = updatedProjects;
     try {
-      const affectedIds = change.type === "rename"
-        ? [change.projectId]
-        : [change.projectId, change.targetProjectId];
       await syncProjectAssignments(
-        assignmentsForProjectIds(affectedIds),
+        assignmentsForProjectIds([change.projectId, change.targetProjectId]),
         { onDebug: appendDebug },
       );
     } catch (error) {
@@ -374,9 +367,7 @@ async function editGraph(change) {
       return;
     }
     render();
-    setStatus(change.type === "rename"
-      ? "Project renamed."
-      : "Conversation moved to the selected project.");
+    setStatus("Conversation moved to the selected project.");
   } catch (error) {
     setStatus(`Could not update project graph: ${error.message}`);
   }

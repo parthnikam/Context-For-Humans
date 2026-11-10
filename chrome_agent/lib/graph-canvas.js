@@ -1,14 +1,30 @@
+﻿import { graphModel } from "./graph-model.js";
+import { searchUrlKey } from "./url.js";
+
 const positions = new Map();
-const LAYOUT = 3;
-const mountedGraphs = new WeakMap();
-const categoryExpansion = new WeakMap();
+const LAYOUT = 4;
+const SPAWN_FADE_STEP = 1 / 15;
+const LINK_LEASH = 100;
+const PROJECT_LEASH = 130;
 
 function radius(node) {
   if (node.kind === "category") return 15;
-  if (node.kind === "link") return 5;
-  if (node.kind === "child") return 9;
-  if (node.kind === "suggestion") return 8;
-  return 12;
+  if (node.kind === "link") return 3;
+  if (node.kind === "child") return 7;
+  if (node.kind === "suggestion") return 7;
+  return 6;
+}
+
+const LIGHT_NODE_KINDS = new Set(["project", "link"]);
+
+function lightenColor(color, amount) {
+  const value = String(color || "").trim();
+  const hex = value.startsWith("#") ? value.slice(1) : "";
+  if (hex.length !== 6) return value;
+  const num = Number.parseInt(hex, 16);
+  if (Number.isNaN(num)) return value;
+  const mix = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${mix((num >> 16) & 255)}, ${mix((num >> 8) & 255)}, ${mix(num & 255)})`;
 }
 
 function publish(node) {
@@ -33,144 +49,6 @@ function clip(label, max) {
   return `${text.slice(0, max - 1)}…`;
 }
 
-function searchUrlKey(url) {
-  const value = String(url || "").trim();
-  if (!value) return "";
-  try {
-    const parsed = new URL(value);
-    parsed.hash = "";
-    return parsed.href;
-  } catch {
-    return value;
-  }
-}
-
-export function fillGraphDetail(host, node, onOpen, onEdit, projects = []) {
-  host.replaceChildren();
-  if (!node) {
-    host.hidden = true;
-    return;
-  }
-  host.hidden = false;
-  const heading = document.createElement("div");
-  heading.className = "graph-detail-heading";
-  const title = document.createElement("p");
-  title.className = "graph-detail-title";
-  title.textContent = node.label;
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "graph-detail-close";
-  close.setAttribute("aria-label", "Close project details");
-  close.textContent = "×";
-  close.addEventListener("click", () => {
-    host.hidden = true;
-    host.replaceChildren();
-  });
-  heading.append(title, close);
-  host.append(heading);
-  if (node.kind === "category") {
-    const categoryProjects = projects.filter(
-      (project) => (project.categoryId || "uncategorized") === node.categoryId,
-    );
-    const conversations = categoryProjects.reduce(
-      (count, project) => count + (project.links || []).length,
-      0,
-    );
-    const summary = document.createElement("p");
-    summary.className = "one-liner";
-    summary.textContent = `${categoryProjects.length} project(s) · ${conversations} conversation(s)`;
-    host.append(summary);
-    return;
-  }
-  if (node.kind === "suggestion") {
-    const line = document.createElement("p");
-    line.className = "one-liner";
-    line.textContent = node.intent || "Still a suggestion. Accept it under Projects.";
-    host.append(line);
-    return;
-  }
-  if (node.intent) {
-    const line = document.createElement("p");
-    line.className = "one-liner";
-    line.textContent = node.intent;
-    host.append(line);
-  }
-  if (node.kind === "project") {
-    const projectForm = document.createElement("form");
-    projectForm.className = "graph-project-name";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.maxLength = 100;
-    nameInput.value = node.label;
-    nameInput.setAttribute("aria-label", "Project name");
-    const renameButton = document.createElement("button");
-    renameButton.type = "submit";
-    renameButton.textContent = "Rename";
-    projectForm.append(nameInput, renameButton);
-    projectForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      onEdit?.({ type: "rename", projectId: node.projectId, name: nameInput.value });
-    });
-    host.append(projectForm);
-
-    const links = node.links || [];
-    const linksHeading = document.createElement("p");
-    linksHeading.className = "graph-detail-section-title";
-    linksHeading.textContent = `Conversations (${links.length})`;
-    const list = document.createElement("div");
-    list.className = "graph-detail-links";
-    for (const link of links) {
-      const row = document.createElement("div");
-      row.className = "graph-detail-link-row";
-      const item = document.createElement("a");
-      item.className = "graph-detail-link";
-      item.href = link.url;
-      item.target = "_blank";
-      item.rel = "noopener noreferrer";
-      item.textContent = link.title || link.url;
-      item.title = link.url;
-      item.addEventListener("click", (event) => {
-        event.preventDefault();
-        onOpen({
-          kind: "link",
-          label: link.title || link.url,
-          url: link.url,
-          projectId: node.projectId,
-        });
-      });
-      const moveSelect = document.createElement("select");
-      moveSelect.className = "graph-detail-move";
-      moveSelect.setAttribute("aria-label", `Move ${link.title || link.url} to another project`);
-      moveSelect.append(new Option("Move to project...", ""));
-      for (const project of projects) {
-        if (project.id === node.projectId) continue;
-        if ((project.categoryId || "uncategorized") !== node.categoryId) continue;
-        const option = new Option(project.name, project.id);
-        moveSelect.append(option);
-      }
-      moveSelect.disabled = moveSelect.options.length === 1;
-      moveSelect.addEventListener("change", () => {
-        if (!moveSelect.value) return;
-        onEdit?.({
-          type: "move",
-          projectId: node.projectId,
-          targetProjectId: moveSelect.value,
-          url: link.url,
-        });
-      });
-      row.append(item, moveSelect);
-      list.append(row);
-    }
-    host.append(linksHeading, list);
-  }
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "text";
-  button.textContent = node.kind === "link" ? "Open link" : "Open project";
-  button.addEventListener("click", () => onOpen(node));
-  host.append(button);
-}
-
 export function mountGraph(canvas, model, options = {}) {
   const nodes = (model?.nodes || []).map((node) => ({
     ...node,
@@ -180,11 +58,35 @@ export function mountGraph(canvas, model, options = {}) {
     vy: 0,
     r: radius(node),
     fixed: false,
+    state: "on",
+    fade: 1,
   }));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const edges = (model?.edges || [])
     .map((edge) => ({ ...edge, source: byId.get(edge.source), target: byId.get(edge.target) }))
     .filter((edge) => edge.source && edge.target);
+
+  const anchorByNodeId = new Map();
+  const categoryByNodeId = new Map();
+  for (const node of nodes) {
+    if (node.kind === "category") {
+      anchorByNodeId.set(node.id, node);
+      categoryByNodeId.set(node.id, node);
+    }
+  }
+  for (const edge of edges) {
+    if (edge.kind === "parent" && edge.target.kind === "project") {
+      anchorByNodeId.set(edge.target.id, edge.source);
+      categoryByNodeId.set(edge.target.id, edge.source);
+    }
+  }
+  for (const edge of edges) {
+    if (edge.kind !== "link") continue;
+    anchorByNodeId.set(edge.target.id, edge.source);
+    const hubCategory = categoryByNodeId.get(edge.source.id);
+    if (hubCategory) categoryByNodeId.set(edge.target.id, hubCategory);
+  }
+
   const linkSlots = new Map();
   const linksByProject = new Map();
   for (const edge of edges) {
@@ -193,10 +95,10 @@ export function mountGraph(canvas, model, options = {}) {
     links.push(edge.target);
     linksByProject.set(edge.source.id, links);
   }
-  for (const [projectId, links] of linksByProject) {
-    const hub = byId.get(projectId);
+  for (const [hubId, links] of linksByProject) {
+    const hub = byId.get(hubId);
     if (!hub) continue;
-    const orbitRadius = Math.max(70, links.length * 11);
+    const orbitRadius = Math.max(48, links.length * 8);
     links.forEach((node, index) => {
       linkSlots.set(node.id, {
         hub,
@@ -219,6 +121,23 @@ export function mountGraph(canvas, model, options = {}) {
       node.y = saved.y;
     }
     placeMissing(nodes, edges);
+  }
+
+  let activeNodes = [];
+  let activeEdges = [];
+  let dirtyActive = false;
+  refreshActive();
+  if (options.initialVisible instanceof Set) {
+    for (const node of nodes) {
+      if (options.initialVisible.has(node.id)) {
+        node.state = "on";
+        node.fade = 1;
+      } else {
+        node.state = "off";
+        node.fade = 0;
+      }
+    }
+    refreshActive();
   }
 
   const ctx = canvas.getContext("2d");
@@ -267,9 +186,49 @@ export function mountGraph(canvas, model, options = {}) {
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
+  function refreshActive() {
+    activeNodes = nodes.filter((node) => node.state !== "off");
+    activeEdges = edges.filter((edge) => edge.source.state !== "off" && edge.target.state !== "off");
+  }
+
+  function fadeOf(node) {
+    if (node.state === "in" || node.state === "out") {
+      return Math.max(0, Math.min(1, node.fade));
+    }
+    return node.state === "off" ? 0 : 1;
+  }
+
+  function transitionsActive() {
+    return activeNodes.some((node) => node.state === "in" || node.state === "out");
+  }
+
+  function setVisible(nextIds) {
+    const next = nextIds instanceof Set ? nextIds : new Set(nextIds);
+    for (const node of nodes) {
+      const shouldShow = next.has(node.id);
+      if (shouldShow && (node.state === "off" || node.state === "out")) {
+        node.state = "in";
+        const anchor = anchorByNodeId.get(node.id);
+        if (anchor) {
+          const angle = Math.random() * Math.PI * 2;
+          const spread = node.kind === "link" ? 14 : 22;
+          node.x = anchor.x + Math.cos(angle) * spread;
+          node.y = anchor.y + Math.sin(angle) * spread;
+          node.vx = 0;
+          node.vy = 0;
+          positions.set(node.id, { x: node.x, y: node.y });
+        }
+      } else if (!shouldShow && (node.state === "on" || node.state === "in")) {
+        node.state = "out";
+      }
+    }
+    refreshActive();
+    wake(0.6);
+  }
+
   function hit(wx, wy) {
-    for (let index = nodes.length - 1; index >= 0; index -= 1) {
-      const node = nodes[index];
+    for (let index = activeNodes.length - 1; index >= 0; index -= 1) {
+      const node = activeNodes[index];
       const dx = node.x - wx;
       const dy = node.y - wy;
       const reach = node.r + 4;
@@ -284,20 +243,20 @@ export function mountGraph(canvas, model, options = {}) {
       .toLowerCase();
     const semanticUrls = options.getSemanticMatches?.() || new Set();
     if (!query && !semanticUrls.size) return null;
-    const lexicalMatches = new Set(nodes
+    const lexicalMatches = new Set(activeNodes
       .filter((node) => query && `${node.label} ${node.intent || ""}`.toLowerCase().includes(query))
       .map((node) => node.id));
-    const semanticNodeIds = new Set(nodes
+    const semanticNodeIds = new Set(activeNodes
       .filter((node) => node.url && semanticUrls.has(searchUrlKey(node.url)))
       .map((node) => node.id));
     const matches = new Set([...lexicalMatches, ...semanticNodeIds]);
-    for (const edge of edges) {
+    for (const edge of activeEdges) {
       if (semanticNodeIds.has(edge.source.id) || semanticNodeIds.has(edge.target.id)) {
         matches.add(edge.source.id);
         matches.add(edge.target.id);
       }
     }
-    for (const edge of edges) {
+    for (const edge of activeEdges) {
       if (lexicalMatches.has(edge.source.id) || lexicalMatches.has(edge.target.id)) {
         matches.add(edge.source.id);
         matches.add(edge.target.id);
@@ -310,7 +269,7 @@ export function mountGraph(canvas, model, options = {}) {
     const near = new Set();
     if (!node) return near;
     near.add(node.id);
-    for (const edge of edges) {
+    for (const edge of activeEdges) {
       if (edge.source === node || edge.target === node) {
         near.add(edge.source.id);
         near.add(edge.target.id);
@@ -373,12 +332,12 @@ export function mountGraph(canvas, model, options = {}) {
 
   function focusNode(node) {
     const ids = neighborhood(node);
-    const list = nodes.filter((item) => ids.has(item.id));
+    const list = activeNodes.filter((item) => ids.has(item.id));
     animateCamera(cameraFor(list.length ? list : [node]));
   }
 
   function showAll() {
-    animateCamera(cameraFor(nodes));
+    animateCamera(cameraFor(activeNodes));
   }
 
   function draw() {
@@ -405,12 +364,13 @@ export function mountGraph(canvas, model, options = {}) {
       return false;
     };
 
-    for (const edge of edges) {
+    for (const edge of activeEdges) {
       const dim = faded(edge.source.id) || faded(edge.target.id);
       const hot = active && near.has(edge.source.id) && near.has(edge.target.id);
-      ctx.globalAlpha = dim ? 0.07 : hot ? 1 : 0.72;
+      const edgeFade = Math.min(fadeOf(edge.source), fadeOf(edge.target));
+      ctx.globalAlpha = (dim ? 0.07 : hot ? 1 : 0.72) * edgeFade;
       ctx.strokeStyle = hot ? paint.accent : paint.muted;
-      ctx.lineWidth = hot ? 1.8 : 1.25;
+      ctx.lineWidth = hot ? 1.2 : 0.8;
       ctx.beginPath();
       ctx.moveTo(edge.source.x, edge.source.y);
       ctx.lineTo(edge.target.x, edge.target.y);
@@ -419,9 +379,10 @@ export function mountGraph(canvas, model, options = {}) {
 
     const query = String(options.getQuery?.() || "").trim().toLowerCase();
     const semanticUrls = options.getSemanticMatches?.() || new Set();
-    for (const node of nodes) {
+    for (const node of activeNodes) {
       const dim = faded(node.id);
-      ctx.globalAlpha = dim ? 0.12 : 1;
+      const nodeFade = fadeOf(node);
+      ctx.globalAlpha = (dim ? 0.12 : 1) * nodeFade;
       ctx.beginPath();
       ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
       if (node.kind === "suggestion") {
@@ -433,7 +394,9 @@ export function mountGraph(canvas, model, options = {}) {
         ctx.stroke();
         ctx.setLineDash([]);
       } else {
-        ctx.fillStyle = node.color;
+        ctx.fillStyle = LIGHT_NODE_KINDS.has(node.kind)
+          ? lightenColor(node.color, 0.35)
+          : node.color;
         ctx.fill();
       }
       if (node === hover || node === selected) {
@@ -458,7 +421,7 @@ export function mountGraph(canvas, model, options = {}) {
       ctx.save();
       ctx.translate(node.x, node.y + node.r + 4);
       ctx.scale(1 / zoom, 1 / zoom);
-      ctx.globalAlpha = dim ? 0.16 : 0.94;
+      ctx.globalAlpha = (dim ? 0.16 : 0.94) * nodeFade;
       ctx.fillStyle = paint.ink;
       ctx.font = "12px Segoe UI, sans-serif";
       ctx.textAlign = "center";
@@ -469,15 +432,34 @@ export function mountGraph(canvas, model, options = {}) {
     ctx.restore();
     canvas.dataset.zoom = zoom.toFixed(3);
     canvas.dataset.panx = panX.toFixed(1);
-    canvas.dataset.nodes = String(nodes.length);
+    canvas.dataset.nodes = String(activeNodes.length);
   }
 
   function tick(dt) {
     const cool = Math.max(alpha, 0.02);
-    for (let i = 0; i < nodes.length; i += 1) {
-      for (let j = i + 1; j < nodes.length; j += 1) {
-        const a = nodes[i];
-        const b = nodes[j];
+
+    for (const node of activeNodes) {
+      if (node.state === "in") {
+        node.fade = Math.min(1, node.fade + SPAWN_FADE_STEP * dt);
+        if (node.fade >= 1) {
+          node.state = "on";
+          dirtyActive = true;
+        }
+      } else if (node.state === "out") {
+        node.fade = Math.max(0, node.fade - SPAWN_FADE_STEP * dt);
+        if (node.fade <= 0) {
+          node.state = "off";
+          dirtyActive = true;
+        }
+      }
+    }
+
+    for (let i = 0; i < activeNodes.length; i += 1) {
+      const a = activeNodes[i];
+      if (a.state === "out") continue;
+      for (let j = i + 1; j < activeNodes.length; j += 1) {
+        const b = activeNodes[j];
+        if (b.state === "out") continue;
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let dist2 = dx * dx + dy * dy;
@@ -516,13 +498,14 @@ export function mountGraph(canvas, model, options = {}) {
         }
       }
     }
-    for (const edge of edges) {
+    for (const edge of activeEdges) {
+      if (edge.source.state === "out" || edge.target.state === "out") continue;
       const a = edge.source;
       const b = edge.target;
       let dx = b.x - a.x;
       let dy = b.y - a.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const desired = edge.kind === "parent" ? 76 : 64;
+      const desired = edge.kind === "parent" ? 88 : 46;
       const mag = ((dist - desired) / dist) * 0.16 * (0.3 + cool) * dt;
       const fx = dx * mag;
       const fy = dy * mag;
@@ -531,7 +514,8 @@ export function mountGraph(canvas, model, options = {}) {
       b.vx -= fx;
       b.vy -= fy;
     }
-    for (const node of nodes) {
+    for (const node of activeNodes) {
+      if (node.state === "out") continue;
       const slot = linkSlots.get(node.id);
       if (!slot) continue;
       const targetX = slot.hub.x + Math.cos(slot.angle) * slot.radius;
@@ -539,8 +523,28 @@ export function mountGraph(canvas, model, options = {}) {
       node.vx += (targetX - node.x) * 0.035 * cool * dt;
       node.vy += (targetY - node.y) * 0.035 * cool * dt;
     }
+    for (const node of activeNodes) {
+      if (node.kind === "category") continue;
+      const category = categoryByNodeId.get(node.id);
+      if (!category) continue;
+      const dx = category.x - node.x;
+      const dy = category.y - node.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      if (node.state === "out") {
+        const mag = 0.22 * (0.3 + cool) * dt;
+        node.vx += dx * mag;
+        node.vy += dy * mag;
+        continue;
+      }
+      const leash = node.kind === "link" ? LINK_LEASH : PROJECT_LEASH;
+      if (dist > leash) {
+        const mag = ((dist - leash) / dist) * 0.3 * cool * dt;
+        node.vx += dx * mag;
+        node.vy += dy * mag;
+      }
+    }
     const damp = Math.pow(0.64, dt);
-    for (const node of nodes) {
+    for (const node of activeNodes) {
       node.vx += -node.x * 0.003 * cool * dt;
       node.vy += -node.y * 0.003 * cool * dt;
       node.vx *= damp;
@@ -573,14 +577,19 @@ export function mountGraph(canvas, model, options = {}) {
     }
     const dt = Math.min(2, Math.max(0.5, (now - (lastTime || now)) / 16.67));
     lastTime = now;
-    if (alpha > 0) tick(dt);
+    if (dirtyActive) {
+      refreshActive();
+      dirtyActive = false;
+    }
+    const animating = alpha > 0 || transitionsActive();
+    if (animating) tick(dt);
     applyCamera(now);
-    if (!userMoved && alpha === 0 && !framed) {
+    if (!userMoved && alpha === 0 && !framed && !transitionsActive()) {
       framed = true;
       if (!selected && !camera) showAll();
     }
     draw();
-    if (alpha > 0 || drag || camera) frame = requestAnimationFrame(step);
+    if (alpha > 0 || drag || camera || transitionsActive()) frame = requestAnimationFrame(step);
     stepping = false;
   }
 
@@ -589,7 +598,7 @@ export function mountGraph(canvas, model, options = {}) {
     viewWidth = Math.max(1, rect?.width || canvas.clientWidth || 1);
     viewHeight = Math.max(1, rect?.height || canvas.clientHeight || 1);
     if (!fitted && !userMoved && !selected && viewWidth > 40 && viewHeight > 40) {
-      const target = cameraFor(nodes);
+      const target = cameraFor(activeNodes);
       zoom = target.zoom;
       panX = target.panX;
       panY = target.panY;
@@ -748,6 +757,9 @@ export function mountGraph(canvas, model, options = {}) {
     redraw() {
       draw();
     },
+    setVisible(ids) {
+      setVisible(ids);
+    },
   };
 }
 
@@ -814,221 +826,44 @@ function placeMissing(nodes, edges) {
   });
 }
 
-export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit, graphOptions = {}) {
-  const previous = mountedGraphs.get(host);
-  previous?.destroy();
-  host.replaceChildren();
-  const find = document.createElement("input");
-  find.className = "graph-find";
-  find.type = "search";
-  find.placeholder = "Search projects or conversations by meaning";
-  find.setAttribute("aria-label", "Search categories, projects, and conversation titles");
-  const results = document.createElement("div");
-  results.className = "category-browser-list";
-  host.classList.add("category-browser");
-  host.append(find, results);
-  detailHost.hidden = true;
-  detailHost.replaceChildren();
-
-  const openCategories = categoryExpansion.get(host) || new Set();
-  categoryExpansion.set(host, openCategories);
-  let semanticMatches = new Set();
-  let searchTimer = 0;
-  let searchSequence = 0;
-
-  function drawCategories(query = find.value.trim().toLowerCase()) {
-    results.replaceChildren();
-    const categories = new Map();
-    for (const project of projects) {
-      const id = String(project.categoryId || "uncategorized");
-      const name = String(project.categoryName || (id === "uncategorized" ? "Needs category repair" : id));
-      const entry = categories.get(id) || { id, name, projects: [] };
-      entry.projects.push(project);
-      categories.set(id, entry);
-    }
-
-    const ordered = [...categories.values()].sort((left, right) => left.name.localeCompare(right.name));
-    if (!ordered.length) {
-      const empty = document.createElement("p");
-      empty.className = "empty-graph";
-      empty.textContent = "Import conversations to build your category list.";
-      results.append(empty);
-      return;
-    }
-
-    let visibleCategoryCount = 0;
-    for (const category of ordered) {
-      const categoryHasSemanticMatch = category.projects.some((project) =>
-        (project.links || []).some((link) => semanticMatches.has(searchUrlKey(link.url)))
-      );
-      const matchingProjects = category.projects.filter((project) => {
-        if (!query) return true;
-        return category.name.toLowerCase().includes(query)
-          || String(project.name || "").toLowerCase().includes(query)
-          || String(project.intent || "").toLowerCase().includes(query)
-          || (project.links || []).some((link) => (
-            String(link.title || "").toLowerCase().includes(query)
-            || semanticMatches.has(searchUrlKey(link.url))
-          ));
-      });
-      if (!matchingProjects.length && query && !categoryHasSemanticMatch) continue;
-
-      visibleCategoryCount += 1;
-      const section = document.createElement("details");
-      section.className = "category-item";
-      section.open = openCategories.has(category.id) || Boolean(query && matchingProjects.length);
-      section.addEventListener("toggle", () => {
-        if (section.open) openCategories.add(category.id);
-        else openCategories.delete(category.id);
-      });
-
-      const summary = document.createElement("summary");
-      summary.className = "category-summary";
-      const categoryName = document.createElement("span");
-      categoryName.className = "category-name";
-      categoryName.textContent = category.name;
-      const categoryCount = document.createElement("span");
-      const conversationCount = category.projects.reduce(
-        (count, project) => count + (project.links || []).length,
-        0,
-      );
-      categoryCount.className = "category-count";
-      categoryCount.textContent = `${category.projects.length} project(s) · ${conversationCount} link(s)`;
-      summary.append(categoryName, categoryCount);
-      section.append(summary);
-
-      for (const project of matchingProjects) {
-        const projectSection = document.createElement("section");
-        projectSection.className = "category-project";
-        const projectHeading = document.createElement("div");
-        projectHeading.className = "category-project-heading";
-        const projectTitle = document.createElement("strong");
-        projectTitle.className = "category-project-title";
-        projectTitle.textContent = project.name || "Untitled project";
-        projectHeading.append(projectTitle);
-        if (project.intent) {
-          const intent = document.createElement("span");
-          intent.className = "category-project-intent";
-          intent.textContent = project.intent;
-          projectHeading.append(intent);
-        }
-
-        const renameForm = document.createElement("form");
-        renameForm.className = "category-project-rename";
-        const renameInput = document.createElement("input");
-        renameInput.type = "text";
-        renameInput.maxLength = 100;
-        renameInput.value = project.name || "";
-        renameInput.setAttribute("aria-label", `Rename ${project.name || "project"}`);
-        const renameButton = document.createElement("button");
-        renameButton.type = "submit";
-        renameButton.textContent = "Rename";
-        renameForm.append(renameInput, renameButton);
-        renameForm.addEventListener("submit", (event) => {
-          event.preventDefault();
-          onEdit?.({ type: "rename", projectId: project.id, name: renameInput.value });
-        });
-        projectHeading.append(renameForm);
-        projectSection.append(projectHeading);
-
-        const links = (project.links || []).filter((link) => {
-          if (!query) return true;
-          return category.name.toLowerCase().includes(query)
-            || String(project.name || "").toLowerCase().includes(query)
-            || String(project.intent || "").toLowerCase().includes(query)
-            || String(link.title || "").toLowerCase().includes(query)
-            || semanticMatches.has(searchUrlKey(link.url));
-        });
-        const linkList = document.createElement("ul");
-        linkList.className = "category-links";
-        for (const link of links) {
-          const row = document.createElement("li");
-          row.className = "category-link-row";
-          if (semanticMatches.has(searchUrlKey(link.url))) row.classList.add("semantic-match");
-          const anchor = document.createElement("a");
-          anchor.className = "category-link";
-          anchor.href = link.url;
-          anchor.target = "_blank";
-          anchor.rel = "noopener noreferrer";
-          anchor.textContent = link.title || link.url;
-          anchor.title = link.url;
-          anchor.addEventListener("click", (event) => {
-            event.preventDefault();
-            onOpen?.({
-              kind: "link",
-              label: link.title || link.url,
-              url: link.url,
-              projectId: project.id,
-            });
-          });
-          row.append(anchor);
-
-          const targets = category.projects.filter((target) => target.id !== project.id);
-          if (targets.length) {
-            const moveSelect = document.createElement("select");
-            moveSelect.className = "category-link-move";
-            moveSelect.setAttribute("aria-label", `Move ${link.title || link.url} to another project in ${category.name}`);
-            moveSelect.append(new Option("Move...", ""));
-            for (const target of targets) moveSelect.append(new Option(target.name, target.id));
-            moveSelect.addEventListener("change", () => {
-              if (!moveSelect.value) return;
-              onEdit?.({
-                type: "move",
-                projectId: project.id,
-                targetProjectId: moveSelect.value,
-                url: link.url,
-              });
-            });
-            row.append(moveSelect);
-          }
-          linkList.append(row);
-        }
-        projectSection.append(linkList);
-        section.append(projectSection);
-      }
-      results.append(section);
-    }
-
-    if (query && !visibleCategoryCount) {
-      const empty = document.createElement("p");
-      empty.className = "empty-graph";
-      empty.textContent = "No category or conversation matches that search.";
-      results.append(empty);
-    }
+export function buildMountedModel(projects) {
+  const model = graphModel({ projects });
+  const projectCategory = new Map();
+  const singleLinkProjects = new Set();
+  for (const node of model.nodes) {
+    if (node.kind !== "project") continue;
+    projectCategory.set(node.id, String(node.categoryId || "uncategorized"));
+    if ((node.links || []).length === 1) singleLinkProjects.add(node.id);
   }
-
-  drawCategories();
-  find.addEventListener("input", () => {
-    semanticMatches = new Set();
-    drawCategories();
-    window.clearTimeout(searchTimer);
-    const sequence = ++searchSequence;
-    const query = find.value.trim();
-    if (query.length < 2 || typeof graphOptions.search !== "function") {
-      return;
+  if (!singleLinkProjects.size) {
+    annotateLinkCategories(model.nodes, projectCategory);
+    return model;
+  }
+  const categoryByProject = new Map();
+  for (const edge of model.edges) {
+    if (edge.kind === "parent") categoryByProject.set(edge.target, edge.source);
+  }
+  const nodes = model.nodes.filter((node) => !(
+    node.kind === "project" && singleLinkProjects.has(node.id)
+  ));
+  const edges = [];
+  for (const edge of model.edges) {
+    if (edge.kind === "parent" && singleLinkProjects.has(edge.target)) continue;
+    if (edge.kind === "link" && singleLinkProjects.has(edge.source)) {
+      const categoryNodeId = categoryByProject.get(edge.source);
+      edges.push(categoryNodeId ? { ...edge, source: categoryNodeId } : edge);
+      continue;
     }
-    searchTimer = window.setTimeout(async () => {
-      try {
-        const result = await graphOptions.search(query);
-        if (sequence !== searchSequence) return;
-        semanticMatches = new Set((Array.isArray(result.matches) ? result.matches : [])
-          .map((item) => searchUrlKey(item.url))
-          .filter(Boolean));
-        drawCategories();
-        onStatus?.(semanticMatches.size
-          ? `Found ${semanticMatches.size} semantically similar conversation(s).`
-          : "No semantic matches found in the saved conversations.");
-      } catch (error) {
-        if (sequence !== searchSequence) return;
-        drawCategories();
-        onStatus?.(`Similarity search unavailable: ${error.message}`);
-      }
-    }, 300);
-  });
-  mountedGraphs.set(host, {
-    destroy() {
-      window.clearTimeout(searchTimer);
-      searchSequence += 1;
-    },
-  });
+    edges.push(edge);
+  }
+  annotateLinkCategories(nodes, projectCategory);
+  return { nodes, edges };
+}
+
+function annotateLinkCategories(nodes, projectCategory) {
+  for (const node of nodes) {
+    if (node.kind !== "link") continue;
+    const categoryId = projectCategory.get(node.projectId);
+    if (categoryId) node.categoryId = categoryId;
+  }
 }

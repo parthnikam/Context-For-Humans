@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { graphModel } from "./graph-model.js";
+import { graphModel } from "../lib/graph-model.js";
 
 const model = graphModel({
   projects: [

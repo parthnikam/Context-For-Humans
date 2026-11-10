@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendGraphData, moveConversation, renameProject } from "./graph-state.js";
+import { appendGraphData, moveConversation } from "../lib/graph-state.js";
 
 const projects = [
   {
@@ -17,11 +17,6 @@ const projects = [
     links: [{ title: "Conversation C", url: "https://example.test/c" }],
   },
 ];
-
-const renamed = renameProject(projects, "p1", "New name");
-assert.equal(renamed[0].name, "New name");
-assert.equal(projects[0].name, "Old name");
-assert.throws(() => renameProject(projects, "p1", "  "), /cannot be empty/);
 
 const moved = moveConversation(projects, "p1", "p2", "https://example.test/a");
 assert.deepEqual(moved[0].links.map((link) => link.url), ["https://example.test/b"]);
@@ -95,4 +90,4 @@ const separatedCategories = appendGraphData(
 assert.equal(separatedCategories.projects.length, 2, "same names in different categories stay separate");
 assert.equal(projects[0].links.length, 2, "append does not mutate prior graph data");
 
-console.log("Graph rename and conversation reassignment checks passed.");
+console.log("Graph conversation reassignment checks passed.");

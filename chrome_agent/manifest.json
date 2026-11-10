@@ -9,13 +9,13 @@
     "http://127.0.0.1:8765/*"
   ],
   "background": {
-    "service_worker": "service-worker.js",
+    "service_worker": "background/service-worker.js",
     "type": "module"
   },
   "action": {
     "default_title": "Conversation Exporter"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "pages/sidepanel.html"
   }
 }

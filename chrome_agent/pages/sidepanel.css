@@ -27,6 +27,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-width: 280px;
   min-height: 100vh;
@@ -446,6 +450,19 @@ select {
   font-weight: 650;
 }
 
+.graph-detail-project {
+  display: grid;
+  gap: 4px;
+}
+
+.graph-detail-project-title {
+  margin: 12px 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
 .graph-detail-links {
   display: grid;
   gap: 5px;
@@ -453,13 +470,6 @@ select {
   overflow: auto;
 }
 
-.graph-project-name {
-  display: flex;
-  gap: 5px;
-  margin: 8px 0;
-}
-
-.graph-project-name input,
 .graph-detail-move {
   min-width: 0;
   border: 1px solid var(--line);
@@ -470,21 +480,34 @@ select {
   font: inherit;
 }
 
-.graph-project-name input {
-  flex: 1;
-}
-
-.graph-project-name button {
-  padding: 5px 8px;
-}
-
 .graph-detail-link-row {
   display: grid;
+  grid-template-columns: 16px 1fr;
   gap: 4px;
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
+}
+
+.provider-logo {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+
+.provider-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.provider-mark svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 
 .graph-detail-link {
@@ -496,11 +519,6 @@ select {
 
 .graph-detail-link:hover {
   text-decoration: underline;
-}
-
-.graph-detail-move {
-  width: 100%;
-  font-size: 11px;
 }
 
 .graph-detail .text {
@@ -545,9 +563,70 @@ select {
   padding: 10px;
 }
 
-.category-browser .graph-find {
+.graph.category-browser.graph-mode {
+  overflow: hidden;
+}
+
+.graph-toolbar {
+  display: flex;
   flex: none;
-  width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-toolbar .graph-find {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.view-toggle {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.view-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.view-toggle-button:hover {
+  border-color: var(--accent);
+}
+
+.view-toggle-button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.view-toggle-button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.graph-view-stage {
+  position: relative;
+  flex: 1;
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.category-browser .graph-find {
   background: var(--bg);
 }
 
@@ -612,13 +691,6 @@ select {
   font-size: 11px;
 }
 
-.category-project-rename {
-  display: flex;
-  gap: 4px;
-}
-
-.category-project-rename input,
-.category-project-rename button,
 .category-link-move {
   min-width: 0;
   padding: 4px 6px;
@@ -627,14 +699,6 @@ select {
   background: var(--card);
   color: var(--ink);
   font: inherit;
-}
-
-.category-project-rename input {
-  width: min(120px, 30vw);
-}
-
-.category-project-rename button {
-  cursor: pointer;
 }
 
 .category-links {
@@ -663,6 +727,7 @@ select {
 
 .category-link {
   min-width: 0;
+  flex: 1;
   color: var(--link);
   overflow-wrap: anywhere;
   text-decoration: none;

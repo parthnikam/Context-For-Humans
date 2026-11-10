@@ -8,7 +8,7 @@ import {
   testChromaService,
   testOpenAIService,
   testTypeSafeService,
-} from "./grouping.js";
+} from "../lib/grouping.js";
 
 const calls = [];
 const debugRecords = [];
@@ -191,7 +191,10 @@ assert.deepEqual(await syncProjectAssignments([{
   project_name: "React project",
 }], { fetch: fakeFetch }), { updated: 1 });
 assert.deepEqual(await clearChromaIndex({ fetch: fakeFetch }), { cleared: true });
-assert.equal(calls.find((call) => call.url.pathname === "/assign").body.assignments.length, 1);
+const assignmentCall = calls.find((call) => call.url.pathname === "/assign");
+assert.equal(assignmentCall.body.assignments.length, 1);
+const clearCall = calls.find((call) => call.url.pathname === "/clear");
+assert.equal(clearCall.init.method, "POST");
 
 console.log("Persistent Chroma clustering and OpenAI project assignment checks passed.");
 

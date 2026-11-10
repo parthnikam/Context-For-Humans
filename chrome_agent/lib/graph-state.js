@@ -62,17 +62,6 @@ export function appendGraphData(existingProjects, existingConversations, newProj
   return { projects, conversations };
 }
 
-export function renameProject(projects, projectId, name) {
-  const nextName = String(name || "").trim();
-  if (!nextName) throw new Error("Project name cannot be empty.");
-  if (!projects.some((project) => project.id === projectId)) {
-    throw new Error("The project no longer exists.");
-  }
-  return projects.map((project) =>
-    project.id === projectId ? { ...project, name: nextName } : project
-  );
-}
-
 export function moveConversation(projects, sourceProjectId, targetProjectId, url) {
   if (sourceProjectId === targetProjectId) return projects;
   const source = projects.find((project) => project.id === sourceProjectId);

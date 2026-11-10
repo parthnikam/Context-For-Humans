@@ -394,6 +394,7 @@ Done when the demo script below works without opening DevTools.
 - Saved graph projects may carry a literal `uncategorized` category ID. The previous migration checked only for a missing ID, so those saved items could bypass reclassification.
 - Clear Graphs previously cleared extension storage only after the backend request succeeded, which prevented clearing the visible graph when the local service was unavailable or stale.
 - The running service on port `8765` returns HTTP 404 for `/categories` and does not report category metadata, confirming it is an older service process and must be restarted before Jev can backfill the records.
+- The running service advertises `POST /clear`, while the extension sent `DELETE /clear`; the resulting 405 explains why ChromaDB data survived the graph clear.
 
 ### Plan
 
@@ -410,4 +411,5 @@ Done when the demo script below works without opening DevTools.
 - [x] Replaced the force graph display with an expandable category browser showing project names and links when a category is opened.
 - [x] Kept project rename, in-category link reassignment, search filtering, and Chroma semantic match highlighting.
 - [x] Made Clear Graphs available when the graph is empty, clear extension storage first, and report a local Chroma cleanup error without restoring the graph.
+- [x] Changed the extension to use the service's supported `POST /clear` method and added a method assertion to the extension test.
 - [x] Run final validation. The currently running service was confirmed stale; restarting it with the current app is required for category backfill.

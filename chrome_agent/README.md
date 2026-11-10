@@ -38,7 +38,7 @@ Restart the local service after creating or changing `.env`. The service reads k
 3. Choose the sidebar or list that contains the conversations. The selected area is outlined on the page.
 4. Select **Extract & group**. The extension scrolls through the list, waits for lazy-loaded items, and groups collected link titles and URLs. After three bottom nudges produce no new links, it stops. A new link resets the counter. Select **Cancel** to stop early.
 5. Or select **Import title,url CSV** to group conversations from a CSV. The header must contain `title` and `url` columns; `conversation_title` is also accepted.
-6. Browse the category list. Click a category to expand it and show all its projects and conversation links. Rename projects inline or move a link to another project in that same category. Use the search field to filter by words or meaning; ChromaDB semantic matches are highlighted. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
+6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**. The graph starts with category nodes only; click a category to spawn its projects and conversation links around it and see them listed in the detail panel. Click empty canvas (or press Escape) to clear the spawn and the detail panel. Drag nodes, pan, and scroll to zoom. Move a link to another project in that same category from the list view. Use the search field to filter by words or meaning in either view; ChromaDB semantic matches are highlighted. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
 
 Expand **API debug console** in the side panel to inspect local-service requests, ChromaDB clusters and category results, semantic search results, and OpenAI assignment payloads and responses. The service does not include API keys or authorization headers in these records. The console remains in memory only and is cleared when the panel closes.
 
@@ -50,4 +50,33 @@ On first side-panel open after this redesign, a saved graph without category met
 
 Each import or extraction is appended to the current graph. New links with URLs already present are skipped; a new group whose name matches an existing project is merged into that project.
 
-The code is split across the side-panel UI, CSV parser/download, local OpenAI assignment client, Python ChromaDB service, page actions, extraction pipeline, and graph model/view. Page extraction reads links rendered as `<a href="...">` elements and does not open conversations or click page controls.
+Each conversation link shows its provider's logo beside the title in list view and in the detail panel: inline brand marks for OpenAI (chatgpt.com/openai.com), Claude (claude.ai/anthropic.com), and Gemini (gemini.google.com), and the site favicon (fetched from Google's favicon service) for any other provider; links without a reachable favicon show none.
+
+The code is organized into folders by responsibility:
+
+```text
+chrome_agent/
+  manifest.json          Extension manifest (paths point into the folders below)
+  background/            Service worker that opens the side panel
+  pages/                 Side panel and the larger graph page (HTML, CSS, JS)
+  lib/                   Shared modules: local-service client (grouping.js),
+                         list view + view toggle (graph-view.js),
+                         canvas force-graph engine (graph-canvas.js),
+                         detail panel (graph-detail.js), provider logos
+                         (provider-logos.js), graph state/model, extraction,
+                         page actions, CSV parsing and download
+  tests/                 Node test files (run: node tests/<file>.js)
+
+chroma_service/
+  app.py                 FastAPI routes (thin) — run with uvicorn
+  config.py              Paths, limits, model names, API-key loading
+  models.py              Pydantic request models
+  categories.py          The 134-category taxonomy sent to Jev
+  typesafe_client.py     Jev Choice classification (batched, token-limit safe)
+  openai_client.py       OpenAI project naming and reuse
+  chroma_store.py        ChromaDB collection, clustering, search, persistence
+  pipeline.py            Categorize-then-cluster orchestration behind /cluster
+  tests/                 Unit tests (run: python -m unittest discover -s chroma_service/tests -t .)
+```
+
+Page extraction reads links rendered as `<a href="...">` elements and does not open conversations or click page controls.
