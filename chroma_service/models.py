@@ -38,3 +38,8 @@ class ProjectAssignmentRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=1000)
     limit: int = Field(default=12, ge=1, le=50)
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    user_id: str = Field(default="local-user", min_length=1, max_length=200)

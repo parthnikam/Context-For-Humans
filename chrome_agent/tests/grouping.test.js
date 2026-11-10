@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import {
+  askQuestion,
   clearChromaIndex,
   groupConversations,
   listCategories,
   searchTitles,
   syncProjectAssignments,
   testChromaService,
+  testMem0Service,
   testOpenAIService,
   testTypeSafeService,
 } from "../lib/grouping.js";
@@ -42,6 +44,17 @@ const fakeFetch = async (url, init = {}) => {
   }
   if (parsedUrl.pathname === "/typesafe-test") {
     return jsonResponse({ ok: true, model: "jev-latest", category: "Programming" });
+  }
+  if (parsedUrl.pathname === "/mem0-test") {
+    return jsonResponse({ ok: true });
+  }
+  if (parsedUrl.pathname === "/ask") {
+    assert.ok(body.question.trim().length >= 1);
+    return jsonResponse({
+      answer: "You filed React Hooks.",
+      memories: ["Project 'React Hooks' contains React hooks guide."],
+      matches: [],
+    });
   }
   if (parsedUrl.pathname === "/categories") {
     return jsonResponse({
@@ -142,6 +155,11 @@ assert.deepEqual(await testTypeSafeService({ fetch: fakeFetch }), {
   model: "jev-latest",
   category: "Programming",
 });
+assert.deepEqual(await testMem0Service({ fetch: fakeFetch }), { ok: true });
+const asked = await askQuestion("what was I working on?", { fetch: fakeFetch });
+assert.equal(asked.answer, "You filed React Hooks.");
+assert.equal(asked.memories.length, 1);
+await assert.rejects(() => askQuestion("   ", { fetch: fakeFetch }), /Ask a question first/);
 assert.deepEqual((await listCategories({ fetch: fakeFetch })).categories.map((category) => category.id), [
   "programming",
   "movies-film",

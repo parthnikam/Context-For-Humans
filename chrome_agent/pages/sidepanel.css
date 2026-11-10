@@ -40,6 +40,51 @@ body {
   font: 13px/1.45 "Segoe UI", sans-serif;
 }
 
+.brand-logo {
+  width: 18px;
+  height: 18px;
+  margin-right: 5px;
+  vertical-align: -4px;
+}
+
+.panel-tabs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.panel-tab {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel-tab:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.panel-tab[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tab-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
 .top {
   display: flex;
   align-items: center;
@@ -337,6 +382,7 @@ select {
 }
 
 .graph-section {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -357,31 +403,6 @@ select {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--card);
-}
-
-.graph-stage {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-
-.graph-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-  cursor: grab;
-}
-
-.graph-hud {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  display: flex;
-  pointer-events: none;
 }
 
 .graph-find {
@@ -624,6 +645,83 @@ select {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg);
+}
+
+.graph-force-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.ask-section {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-log {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  max-height: 240px;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.ask-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ask-message {
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ask-message.you {
+  justify-self: end;
+  max-width: 85%;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.ask-message.assistant {
+  justify-self: start;
+  max-width: 95%;
+  background: var(--bg);
+}
+
+.ask-form {
+  display: flex;
+  gap: 6px;
+}
+
+.ask-form input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.ask-form button {
+  flex: none;
+  padding: 6px 12px;
 }
 
 .category-browser .graph-find {

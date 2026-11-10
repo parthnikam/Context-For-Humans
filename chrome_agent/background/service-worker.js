@@ -5,6 +5,6 @@ configureSidePanel();
 
 function configureSidePanel() {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
-    console.error("Could not configure the Conversation Exporter side panel:", error);
+    console.error("Could not configure the Context For Humans side panel:", error);
   });
 }

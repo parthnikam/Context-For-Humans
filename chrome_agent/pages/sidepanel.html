@@ -9,84 +9,108 @@
   <body>
     <header class="top">
       <div>
-        <p class="eyebrow">Conversation Exporter</p>
+        <p class="eyebrow"><img class="brand-logo" src="../icons/brain.svg" alt="">Context For Humans</p>
         <h1>Project graph</h1>
       </div>
-      <button id="settings-toggle" class="text-button" type="button" aria-expanded="false">AI settings</button>
     </header>
 
-    <details id="settings" class="settings">
-      <summary>AI grouping settings</summary>
-      <div class="service-row">
-        <div>
-          <strong>Local ChromaDB</strong>
-        </div>
-        <button id="test-chroma" class="quiet-button" type="button">Test service</button>
-      </div>
-      <div class="service-row">
-        <div>
-          <strong>TypeSafe Jev category classifier</strong>
-          <p class="hint">Classifies conversation titles into 134 fixed categories.</p>
-        </div>
-        <button id="test-typesafe" class="quiet-button" type="button">Test Jev</button>
-      </div>
-      <div class="service-row">
-        <div>
-          <strong>OpenAI project naming</strong>
-          <p class="hint">Names ChromaDB clusters within each category.</p>
-        </div>
-        <button id="test-openai" class="quiet-button" type="button">Test OpenAI</button>
-      </div>
-      <div class="threshold-control">
-        <label for="similarity-threshold">Chroma cosine similarity threshold</label>
-        <div class="threshold-row">
-          <input id="similarity-threshold" type="number" min="0" max="1" step="0.05" value="0.62">
-          <span class="hint">0–1; lower values create broader groups</span>
-        </div>
-      </div>
-    </details>
+    <nav class="panel-tabs" aria-label="Panel sections">
+      <button id="tab-graph" class="panel-tab" type="button" role="tab" aria-selected="true">Graph</button>
+      <button id="tab-import" class="panel-tab" type="button" role="tab" aria-selected="false">Import</button>
+    </nav>
 
     <main>
-      <section class="source-tools" aria-label="Add conversations">
-        <div class="tool-row">
-          <button id="detect-areas" type="button">Detect chat list</button>
-          <button id="extract" type="button" disabled>Extract &amp; group</button>
-          <button id="cancel" class="quiet-button" type="button" hidden>Cancel</button>
-        </div>
-        <label for="area-select">Scrollable area</label>
-        <select id="area-select" disabled>
-          <option value="">Detect a chat list first</option>
-        </select>
-        <div class="import-row">
-          <label class="file-button" for="csv-file">Import title,url CSV</label>
-          <input id="csv-file" type="file" accept=".csv,text/csv">
-          <span id="file-name" class="file-name">or choose a CSV</span>
-        </div>
-      </section>
-
       <p id="status" class="status" role="status" aria-live="polite">Import a CSV or detect a chat list to begin.</p>
-      <details id="debug-console" class="debug-console">
-        <summary>
-          <span>API debug console</span>
-          <span id="debug-count" class="counts">0 records</span>
-        </summary>
-        <div class="debug-tools">
-          <button id="clear-debug" class="quiet-button" type="button">Clear log</button>
-        </div>
-        <pre id="debug-output" class="debug-output" aria-live="polite">ChromaDB clusters, TypeSafe Jev category results, and OpenAI assignment requests will appear here during grouping.</pre>
-      </details>
-      <section class="graph-section" aria-label="Conversation category browser">
-        <div class="graph-heading">
-          <h2>Categories</h2>
-          <span id="counts" class="counts">No data</span>
-          <a id="view-larger" class="text-button" href="graph.html" target="_blank" rel="noopener" aria-disabled="true">View larger</a>
-          <button id="download" class="text-button" type="button" disabled>Download CSV</button>
-          <button id="clear-graphs" class="text-button danger-button" type="button" disabled>Clear graphs</button>
-        </div>
-        <div id="graph" class="graph" aria-label="Project graph. Search by title words or meaning to highlight similar conversations."></div>
-        <div id="project-detail" class="graph-detail" hidden></div>
-      </section>
+
+      <div id="view-graph" class="tab-view" role="tabpanel">
+        <section class="ask-section" aria-label="Ask about your projects">
+          <form id="ask-form" class="ask-form">
+            <input id="ask-input" type="text" placeholder="Ask about your projects..." autocomplete="off" aria-label="Ask about your projects">
+            <button type="submit">Ask</button>
+          </form>
+        </section>
+        <section class="graph-section" aria-label="Conversation category browser">
+          <div class="graph-heading">
+            <h2>Categories</h2>
+            <span id="counts" class="counts">No data</span>
+            <a id="view-larger" class="text-button" href="graph.html" target="_blank" rel="noopener" aria-disabled="true">View larger</a>
+            <button id="download" class="text-button" type="button" disabled>Download CSV</button>
+            <button id="clear-graphs" class="text-button danger-button" type="button" disabled>Clear graphs</button>
+          </div>
+          <div id="graph" class="graph" aria-label="Project graph. Search by title words or meaning to highlight similar conversations."></div>
+          <div id="project-detail" class="graph-detail" hidden></div>
+        </section>
+      </div>
+
+      <div id="view-import" class="tab-view" role="tabpanel" hidden>
+        <section class="source-tools" aria-label="Add conversations">
+          <div class="tool-row">
+            <button id="detect-areas" type="button">Detect chat list</button>
+            <button id="extract" type="button" disabled>Extract &amp; group</button>
+            <button id="cancel" class="quiet-button" type="button" hidden>Cancel</button>
+          </div>
+          <label for="area-select">Scrollable area</label>
+          <select id="area-select" disabled>
+            <option value="">Detect a chat list first</option>
+          </select>
+          <div class="import-row">
+            <label class="file-button" for="csv-file">Import title,url CSV</label>
+            <input id="csv-file" type="file" accept=".csv,text/csv">
+            <span id="file-name" class="file-name">or choose a CSV</span>
+          </div>
+        </section>
+
+        <details id="settings" class="settings" open>
+          <summary>AI grouping settings</summary>
+          <div class="service-row">
+            <div>
+              <strong>Local ChromaDB</strong>
+            </div>
+            <button id="test-chroma" class="quiet-button" type="button">Test service</button>
+          </div>
+          <div class="service-row">
+            <div>
+              <strong>TypeSafe Jev category classifier</strong>
+              <p class="hint">Classifies conversation titles into 134 fixed categories.</p>
+            </div>
+            <button id="test-typesafe" class="quiet-button" type="button">Test Jev</button>
+          </div>
+          <div class="service-row">
+            <div>
+              <strong>OpenAI project naming</strong>
+              <p class="hint">Names ChromaDB clusters within each category.</p>
+            </div>
+            <button id="test-openai" class="quiet-button" type="button">Test OpenAI</button>
+          </div>
+          <div class="service-row">
+            <div>
+              <strong>Mem0 project memory</strong>
+              <p class="hint">Remembers filed projects so you can ask about them.</p>
+            </div>
+            <button id="test-mem0" class="quiet-button" type="button">Test Mem0</button>
+          </div>
+          <div class="threshold-control">
+            <label for="similarity-threshold">Chroma cosine similarity threshold</label>
+            <div class="threshold-row">
+              <input id="similarity-threshold" type="number" min="0" max="1" step="0.05" value="0.62">
+              <span class="hint">0–1; lower values create broader groups</span>
+            </div>
+          </div>
+        </details>
+
+        <details id="debug-console" class="debug-console">
+          <summary>
+            <span>API debug console</span>
+            <span id="debug-count" class="counts">0 records</span>
+          </summary>
+          <div class="debug-tools">
+            <button id="clear-debug" class="quiet-button" type="button">Clear log</button>
+          </div>
+          <pre id="debug-output" class="debug-output" aria-live="polite">ChromaDB clusters, TypeSafe Jev category results, and OpenAI assignment requests will appear here during grouping.</pre>
+        </details>
+      </div>
     </main>
+    <script src="panel-error.js"></script>
     <script type="module" src="sidepanel.js"></script>
   </body>
 </html>

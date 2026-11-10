@@ -72,6 +72,28 @@ export async function testTypeSafeService(options = {}) {
   });
 }
 
+export async function testMem0Service(options = {}) {
+  return requestJson("/mem0-test", {
+    ...options,
+    method: "POST",
+    body: {},
+    service: "Mem0",
+    stage: "Test project memory",
+  });
+}
+
+export async function askQuestion(question, options = {}) {
+  const text = String(question || "").trim();
+  if (!text) throw new Error("Ask a question first.");
+  return requestJson("/ask", {
+    ...options,
+    method: "POST",
+    body: { question: text },
+    service: "Ask projects",
+    stage: "Answer question",
+  });
+}
+
 export async function listCategories(options = {}) {
   return requestJson("/categories", {
     ...options,

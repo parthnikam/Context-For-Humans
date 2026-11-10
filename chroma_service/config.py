@@ -33,6 +33,10 @@ def load_typesafe_api_key() -> str:
     return _load_env_key("TYPESAFE_API_KEY")
 
 
+def load_mem0_api_key() -> str:
+    return _load_env_key("MEM0_API_KEY") or _load_env_key("MEMO_API_KEY")
+
+
 def _load_env_key(name: str) -> str:
     key = os.environ.get(name, "").strip()
     if key:

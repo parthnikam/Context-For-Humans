@@ -1,12 +1,12 @@
-﻿import { buildMountedModel, mountGraph } from "./graph-canvas.js";
+﻿import { mountGraph } from "./graph-force.js";
 import { fillGraphDetail } from "./graph-detail.js";
+import { graphModel } from "./graph-model.js";
 import { providerLogo } from "./provider-logos.js";
 import { searchUrlKey } from "./url.js";
 
 const mountedGraphs = new WeakMap();
 const categoryExpansion = new WeakMap();
 const viewModes = new WeakMap();
-const graphExpansion = new WeakMap();
 
 const VIEW_ICONS = {
   list: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>',
@@ -38,56 +38,32 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
   results.className = "category-browser-list";
   const stage = document.createElement("div");
   stage.className = "graph-view-stage";
-  const canvas = document.createElement("canvas");
-  canvas.className = "graph-canvas";
-  stage.append(canvas);
   host.append(toolbar, results, stage);
   detailHost.hidden = true;
   detailHost.replaceChildren();
 
   const openCategories = categoryExpansion.get(host) || new Set();
   categoryExpansion.set(host, openCategories);
-  const expandedCategories = graphExpansion.get(host) || new Set();
-  graphExpansion.set(host, expandedCategories);
   let semanticMatches = new Set();
   let searchTimer = 0;
   let searchSequence = 0;
   let mode = viewModes.get(host) === "graph" ? "graph" : "list";
   let graphHandle = null;
 
-  const mountedModel = buildMountedModel(projects);
-
-  function computeVisibleIds() {
-    const ids = new Set();
-    for (const node of mountedModel.nodes) {
-      if (node.kind === "category") {
-        ids.add(node.id);
-      } else if (expandedCategories.has(String(node.categoryId || "uncategorized"))) {
-        ids.add(node.id);
-      }
-    }
-    return ids;
-  }
+  const mountedModel = graphModel({ projects });
 
   function mountNodeGraph() {
     graphHandle?.destroy();
-    graphHandle = mountGraph(canvas, mountedModel, {
-      initialVisible: computeVisibleIds(),
+    graphHandle = mountGraph(stage, mountedModel, {
       getQuery: () => find.value.trim(),
       getSemanticMatches: () => semanticMatches,
       onSelect: (node) => {
         if (!node) {
-          expandedCategories.clear();
           detailHost.hidden = true;
           detailHost.replaceChildren();
-          graphHandle?.setVisible(computeVisibleIds());
           return;
         }
         fillGraphDetail(detailHost, node, onOpen, projects);
-        if (node.kind !== "category" || !node.categoryId) return;
-        if (expandedCategories.has(node.categoryId)) return;
-        expandedCategories.add(node.categoryId);
-        graphHandle?.setVisible(computeVisibleIds());
       },
       onOpen,
     });

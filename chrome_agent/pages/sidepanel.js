@@ -1,12 +1,14 @@
 import { parseConversationCsv } from "../lib/csv.js";
 import { extractConversations } from "../lib/extraction.js";
 import {
+  askQuestion,
   clearChromaIndex,
   DEFAULT_SIMILARITY_THRESHOLD,
   groupConversations,
   listCategories,
   searchTitles,
   syncProjectAssignments,
+  testMem0Service,
   testOpenAIService,
   testTypeSafeService,
   testChromaService,
@@ -31,12 +33,18 @@ const status = document.querySelector("#status");
 const counts = document.querySelector("#counts");
 const graph = document.querySelector("#graph");
 const detail = document.querySelector("#project-detail");
-const settings = document.querySelector("#settings");
 const similarityThresholdInput = document.querySelector("#similarity-threshold");
 const downloadButton = document.querySelector("#download");
 const viewLargerLink = document.querySelector("#view-larger");
 const debugOutput = document.querySelector("#debug-output");
 const debugCount = document.querySelector("#debug-count");
+const askLog = document.querySelector("#ask-log");
+const askForm = document.querySelector("#ask-form");
+const askInput = document.querySelector("#ask-input");
+const graphTabButton = document.querySelector("#tab-graph");
+const importTabButton = document.querySelector("#tab-import");
+const graphTabView = document.querySelector("#view-graph");
+const importTabView = document.querySelector("#view-import");
 
 let areas = [];
 let projects = [];
@@ -59,13 +67,21 @@ downloadButton.addEventListener("click", () => createCsvDownload(conversations))
 document.querySelector("#test-openai").addEventListener("click", testOpenAIConnection);
 document.querySelector("#test-typesafe").addEventListener("click", testTypeSafeConnection);
 document.querySelector("#test-chroma").addEventListener("click", testChromaServiceConnection);
+document.querySelector("#test-mem0").addEventListener("click", testMem0Connection);
+askForm.addEventListener("submit", handleAsk);
 document.querySelector("#clear-graphs").addEventListener("click", clearGraphs);
 document.querySelector("#clear-debug").addEventListener("click", clearDebug);
 similarityThresholdInput.addEventListener("change", saveSimilarityThreshold);
-document.querySelector("#settings-toggle").addEventListener("click", () => {
-  settings.open = !settings.open;
-  document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(settings.open));
-});
+graphTabButton.addEventListener("click", () => selectPanelTab("graph"));
+importTabButton.addEventListener("click", () => selectPanelTab("import"));
+
+function selectPanelTab(name) {
+  const isGraph = name === "graph";
+  graphTabButton.setAttribute("aria-selected", String(isGraph));
+  importTabButton.setAttribute("aria-selected", String(!isGraph));
+  graphTabView.hidden = !isGraph;
+  importTabView.hidden = isGraph;
+}
 
 initialize();
 
@@ -169,6 +185,54 @@ async function testChromaServiceConnection() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function testMem0Connection() {
+  const button = document.querySelector("#test-mem0");
+  button.disabled = true;
+  setStatus("Testing Mem0 project memory...");
+  try {
+    await testMem0Service({ onDebug: appendDebug });
+    setStatus("Mem0 is ready.");
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleAsk(event) {
+  event.preventDefault();
+  const question = askInput.value.trim();
+  if (!question) return;
+  appendAskMessage("you", question);
+  askInput.value = "";
+  const sendButton = askForm.querySelector("button");
+  sendButton.disabled = true;
+  askInput.disabled = true;
+  setStatus("Asking about your projects...");
+  try {
+    const result = await askQuestion(question, { onDebug: appendDebug });
+    appendAskMessage("assistant", result.answer);
+    setStatus("Answered.");
+  } catch (error) {
+    appendAskMessage("assistant", `Could not answer: ${error.message}`);
+    setStatus(error.message);
+  } finally {
+    sendButton.disabled = false;
+    askInput.disabled = false;
+    askInput.focus();
+  }
+}
+
+function appendAskMessage(role, text) {
+  const empty = askLog.querySelector(".ask-empty");
+  if (empty) empty.remove();
+  const line = document.createElement("p");
+  line.className = `ask-message ${role}`;
+  line.textContent = text;
+  askLog.append(line);
+  askLog.scrollTop = askLog.scrollHeight;
 }
 
 async function saveSimilarityThreshold() {
@@ -325,6 +389,7 @@ async function groupAndShow(entries, source) {
     return;
   }
   render();
+  selectPanelTab("graph");
   setStatus(`Added ${newEntries.length} conversation(s); graph now has ${projects.length} project(s) and ${conversations.length} conversation(s).`);
 }
 
@@ -454,6 +519,9 @@ function setBusy(next) {
 async function runOnActiveTab(action) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id) throw new Error("No active tab is available.");
+  if (/^(chrome|edge|about|devtools|view-source):/i.test(tab.url || "")) {
+    throw new Error("Browser-internal pages cannot be scanned. Open your chat page in a normal tab and try again.");
+  }
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: runPageAction,

@@ -8,9 +8,10 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from chroma_service import chroma_store, config, openai_client, pipeline
+from chroma_service import chroma_store, config, mem0_client, openai_client, pipeline, qa
 from chroma_service.categories import CATEGORIES
 from chroma_service.models import (
+    AskRequest,
     AssignmentRequest,
     ClusterRequest,
     ProjectAssignmentRequest,
@@ -18,7 +19,7 @@ from chroma_service.models import (
 )
 from chroma_service.typesafe_client import classify_titles_with_typesafe
 
-app = FastAPI(title="Conversation Exporter Chroma Service", version="1.0.0")
+app = FastAPI(title="Context For Humans Chroma Service", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^chrome-extension://[a-p]{32}$",
@@ -73,6 +74,16 @@ def test_openai() -> dict:
     return openai_client.test_openai_connection()
 
 
+@app.post("/mem0-test")
+def test_mem0() -> dict:
+    return mem0_client.test_mem0_connection()
+
+
+@app.post("/ask")
+def ask(request: AskRequest) -> dict:
+    return qa.answer_question(request.question, request.user_id)
+
+
 @app.post("/cluster")
 def cluster_titles(request: ClusterRequest) -> dict:
     try:
@@ -91,7 +102,9 @@ def assign_projects(request: ProjectAssignmentRequest) -> dict:
 
 @app.post("/assign")
 def assign_projects_metadata(request: AssignmentRequest) -> dict:
-    return {"updated": chroma_store.apply_assignments(request.assignments)}
+    updated = chroma_store.apply_assignments(request.assignments)
+    memorized = qa.remember_projects(request.assignments)
+    return {"updated": updated, "memorized": memorized}
 
 
 @app.post("/search")

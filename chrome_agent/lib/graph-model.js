@@ -1,4 +1,4 @@
-const PALETTE = ["#2f6f5e", "#3c6e91", "#8a5a2a", "#6e4c86", "#8d4548", "#3e6b38", "#2c6a72", "#7a5730"];
+const PALETTE = ["#e84393", "#0984e3", "#6c5ce7", "#00b894", "#f39c12", "#e17055", "#00cec9", "#a29bfe", "#fd79a8", "#2ecc71", "#f1c40f", "#34ace0"];
 
 function pageKey(url) {
   const value = String(url || "").trim();

@@ -1,4 +1,4 @@
-# Conversation Exporter
+# Context For Humans
 
 A Manifest V3 Chrome extension that scrolls a selected chat list or imports a CSV, classifies conversation titles into 134 broad categories with TypeSafe Jev, groups related titles inside each category with a persistent local ChromaDB vector index, and uses OpenAI to name the resulting projects. The graph displays the category -> project -> conversation hierarchy.
 
@@ -6,7 +6,7 @@ A Manifest V3 Chrome extension that scrolls a selected chat list or imports a CS
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
-3. Select **Load unpacked** and choose this `chrome_agent` folder. Use Chrome 114 or newer for the side-panel API.
+3. Select **Load unpacked** and choose this `chrome_agent` folder. Use Chrome 114 or newer for the side-panel API. The extension requests access to all sites so it can scroll and read conversation links from any chat page; reload it in `chrome://extensions` after changing the manifest.
 4. Open the chat page and select the extension toolbar button to open the side panel. If the extension was already installed, select **Reload** for it in `chrome://extensions` first.
 
 ## Start the local ChromaDB service
@@ -20,25 +20,29 @@ python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8765
 
 Keep that terminal open while using the extension. The first indexing request may download ChromaDB's default sentence embedding model. Chroma persists its collection under `chroma_service/data/`; it remains available across extension reloads and CSV imports. The service binds only to localhost and accepts browser requests from Chrome extension origins.
 
-## Configure TypeSafe and OpenAI
+## Configure TypeSafe, OpenAI, and Mem0
 
-Put both API keys in `chrome_agent/.env`:
+Put the API keys in `chrome_agent/.env`:
 
 ```text
 TYPESAFE_API_KEY=your-typesafe-key
 OPENAI_API_KEY=your-key
+MEM0_API_KEY=your-mem0-key
 ```
 
-Restart the local service after creating or changing `.env`. The service reads keys from its environment first and then from this file. Keys stay in the Python service; they are not stored in Chrome, sent by the extension, or written to the debug console. In **AI grouping settings**, select **Test Jev** and **Test OpenAI** to check both API connections. Jev uses the `jev-latest` Choice model; OpenAI project naming uses `gpt-5.6-luna`. See [TypeSafe's Choice docs](https://docs.typesafe.ai/primitives/choice) for the classification primitive.
+`MEMO_API_KEY` is also accepted. Restart the local service after creating or changing `.env`. The service reads keys from its environment first and then from this file. Keys stay in the Python service; they are not stored in Chrome, sent by the extension, or written to the debug console. In **AI grouping settings**, select **Test service**, **Test Jev**, **Test OpenAI**, and **Test Mem0** to check the connections. Jev uses the `jev-latest` Choice model; OpenAI project naming and project answers use `gpt-5.6-luna`; Mem0 remembers filed projects so you can ask about them later. See [TypeSafe's Choice docs](https://docs.typesafe.ai/primitives/choice) for the classification primitive.
 
 ## Group conversations
 
-1. Start the local service, then open **AI grouping settings** and select **Test service**, **Test Jev**, and **Test OpenAI**.
+The side panel has two tabs. **Graph** holds the Ask chatbox at the top and the category browser below it. **Import** holds the extraction tools, the AI grouping settings (service tests and similarity threshold), and the API debug console.
+
+1. Start the local service, then open the **Import** tab and select **Test service**, **Test Jev**, **Test OpenAI**, and **Test Mem0**.
 2. To extract from a chat page, select **Detect chat list**.
 3. Choose the sidebar or list that contains the conversations. The selected area is outlined on the page.
 4. Select **Extract & group**. The extension scrolls through the list, waits for lazy-loaded items, and groups collected link titles and URLs. After three bottom nudges produce no new links, it stops. A new link resets the counter. Select **Cancel** to stop early.
 5. Or select **Import title,url CSV** to group conversations from a CSV. The header must contain `title` and `url` columns; `conversation_title` is also accepted.
-6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**. The graph starts with category nodes only; click a category to spawn its projects and conversation links around it and see them listed in the detail panel. Click empty canvas (or press Escape) to clear the spawn and the detail panel. Drag nodes, pan, and scroll to zoom. Move a link to another project in that same category from the list view. Use the search field to filter by words or meaning in either view; ChromaDB semantic matches are highlighted. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
+6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**: a live d3-force simulation of every category, project, and conversation, with vibrant per-category colors. Zoomed out only the categories are crisp; zoom in and the projects, then conversation links, pull into focus from a soft blur. Drag nodes and the physics re-settles; hover to highlight a neighborhood; click a node for details; double-click to open it; pan and scroll to zoom. Use the search field to filter by words or meaning in either view; ChromaDB semantic matches are highlighted with a ring.
+7. Use **Ask** at the bottom of the side panel to ask questions about your projects ("what was I working on with React?"). The service retrieves Mem0 memories of every filed project plus semantically matched conversations from ChromaDB, and OpenAI answers using only that context. Filing or importing conversations stores each project in Mem0 automatically. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
 
 Expand **API debug console** in the side panel to inspect local-service requests, ChromaDB clusters and category results, semantic search results, and OpenAI assignment payloads and responses. The service does not include API keys or authorization headers in these records. The console remains in memory only and is cleared when the panel closes.
 
@@ -59,9 +63,11 @@ chrome_agent/
   manifest.json          Extension manifest (paths point into the folders below)
   background/            Service worker that opens the side panel
   pages/                 Side panel and the larger graph page (HTML, CSS, JS)
+  vendor/                Vendored open-source libraries (d3-force physics
+                         engine and its quadtree/dispatch/timer deps)
   lib/                   Shared modules: local-service client (grouping.js),
                          list view + view toggle (graph-view.js),
-                         canvas force-graph engine (graph-canvas.js),
+                         force-directed canvas graph (graph-force.js),
                          detail panel (graph-detail.js), provider logos
                          (provider-logos.js), graph state/model, extraction,
                          page actions, CSV parsing and download
@@ -75,6 +81,8 @@ chroma_service/
   typesafe_client.py     Jev Choice classification (batched, token-limit safe)
   openai_client.py       OpenAI project naming and reuse
   chroma_store.py        ChromaDB collection, clustering, search, persistence
+  mem0_client.py         Mem0 Platform client (add and search project memories)
+  qa.py                  /ask pipeline: Mem0 + ChromaDB context -> OpenAI answer
   pipeline.py            Categorize-then-cluster orchestration behind /cluster
   tests/                 Unit tests (run: python -m unittest discover -s chroma_service/tests -t .)
 ```
