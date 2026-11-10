@@ -159,6 +159,7 @@ projectsFind.addEventListener("input", () => {
       renderProjectsBrowser();
     } else {
       tabGraphHandle?.redraw();
+      tabGraphHandle?.focusSearch();
     }
   }, 300);
 });

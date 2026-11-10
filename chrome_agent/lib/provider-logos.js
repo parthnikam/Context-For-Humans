@@ -14,6 +14,11 @@
     hosts: ["gemini.google.com", "bard.google.com", "aistudio.google.com"],
     icon: "icons/gemini.png",
   },
+  {
+    name: "DeepSeek",
+    hosts: ["chat.deepseek.com", "deepseek.com", "platform.deepseek.com"],
+    icon: "icons/deepseek.png",
+  },
 ];
 const PROVIDER_HOST_MAP = new Map();
 for (const mark of PROVIDER_MARKS) {

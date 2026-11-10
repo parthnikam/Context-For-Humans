@@ -257,6 +257,7 @@ export function renderGraph(host, projects, detailHost, onStatus, onOpen, onEdit
           .filter(Boolean));
         drawCategories();
         graphHandle?.redraw();
+        graphHandle?.focusSearch();
         onStatus?.(semanticMatches.size
           ? `Found ${semanticMatches.size} semantically similar conversation(s).`
           : "No semantic matches found in the saved conversations.");

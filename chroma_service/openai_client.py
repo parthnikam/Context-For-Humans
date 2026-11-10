@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import requests
@@ -296,12 +297,15 @@ def build_tab_cluster_prompt(request: TabClusterRequest) -> str:
     rules = [
         "- Group by task, not by website. Two GitHub tabs can be different projects. A docs tab and a forum tab can be the same project.",
         "- Put every tab id in exactly one trail.",
+        "- Prefer the fewest trails that make sense. Merge tabs into one trail whenever they belong to the same work.",
+        "- Create a separate trail only when tabs clearly belong to a different project than the other trails.",
+        "- Avoid one-tab trails: put a lone tab into the closest fitting trail or existing project.",
         "- label is a short project name.",
         "- one_liner is one sentence the person can read to remember what that pile of tabs is for.",
     ]
     if known:
-        rules.append("- If the tabs belong to an existing project, label must be that project's name exactly.")
-        rules.append("- Invent a new label only when none of the existing projects fit.")
+        rules.append("- If the tabs are even loosely related to an existing project, label must be that project's name exactly. Prefer existing projects over inventing new ones.")
+        rules.append("- Invent a new label only when none of the existing projects clearly do not fit.")
     lines = [
         "Group these open browser tabs into the projects the person is working on.",
         "",
@@ -350,6 +354,36 @@ def normalize_trails(raw_trails: Any, request: TabClusterRequest) -> list[dict[s
     return trails
 
 
+def _label_tokens(label: str) -> set[str]:
+    return {token for token in re.split(r"[^a-z0-9]+", label.lower()) if len(token) >= 3}
+
+
+def snap_trails_to_projects(trails: list[dict[str, Any]], request: TabClusterRequest) -> list[dict[str, Any]]:
+    names = []
+    for project in request.projects:
+        name = project.name.strip()
+        if name:
+            names.append((name, name.lower(), _label_tokens(name)))
+    if not names:
+        return trails
+    for trail in trails:
+        label = str(trail.get("label") or "").strip()
+        lowered = label.lower()
+        if not label or lowered == "ungrouped":
+            continue
+        trail_tokens = _label_tokens(lowered)
+        for original, existing, existing_tokens in names:
+            if lowered == existing:
+                trail["label"] = original
+                break
+            smaller = trail_tokens if len(trail_tokens) <= len(existing_tokens) else existing_tokens
+            larger = existing_tokens if smaller is trail_tokens else trail_tokens
+            if smaller and smaller <= larger and any(len(token) >= 4 for token in smaller):
+                trail["label"] = original
+                break
+    return trails
+
+
 def cluster_tabs(request: TabClusterRequest) -> dict[str, Any]:
     api_key = load_openai_api_key()
     if not api_key:
@@ -395,5 +429,5 @@ def cluster_tabs(request: TabClusterRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="OpenAI returned invalid tab clusters.")
     return {
         "model": OPENAI_MODEL,
-        "trails": normalize_trails(trails, request),
+        "trails": snap_trails_to_projects(normalize_trails(trails, request), request),
     }

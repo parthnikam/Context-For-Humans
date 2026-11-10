@@ -194,6 +194,48 @@ class OpenAiClientTests(unittest.TestCase):
         self.assertTrue(payload["response_format"]["json_schema"]["strict"])
         self.assertIn("React learning", payload["messages"][1]["content"])
 
+    def test_cluster_tabs_snaps_trail_labels_to_existing_projects(self):
+        response = openai_response({
+            "trails": [
+                {"label": "React hooks learning work", "one_liner": "Learning React.", "tab_ids": [1]},
+                {"label": "Weeknight Pasta Recipes", "one_liner": "Cooking.", "tab_ids": [2]},
+                {"label": "Kubernetes debugging notes", "one_liner": "K8s.", "tab_ids": [3]},
+            ],
+        })
+        request = TabClusterRequest(
+            tabs=[
+                {"id": 1, "title": "React docs", "url": "https://a.test/1"},
+                {"id": 2, "title": "Pasta recipe", "url": "https://a.test/2"},
+                {"id": 3, "title": "K8s docs", "url": "https://a.test/3"},
+            ],
+            projects=[
+                {"name": "React Learning", "intent": ""},
+                {"name": "Weeknight Pasta", "intent": ""},
+            ],
+        )
+        with patch.object(openai_client, "load_openai_api_key", return_value="unit-test-key"), \
+                patch.object(openai_client.requests, "post", return_value=response):
+            result = openai_client.cluster_tabs(request)
+        labels = [trail["label"] for trail in result["trails"]]
+        self.assertIn("React Learning", labels)
+        self.assertIn("Weeknight Pasta", labels)
+        self.assertIn("Kubernetes debugging notes", labels)
+        self.assertNotIn("React hooks learning work", labels)
+        self.assertNotIn("Weeknight Pasta Recipes", labels)
+
+    def test_cluster_tabs_does_not_snap_unrelated_labels(self):
+        response = openai_response({
+            "trails": [{"label": "React Hooks", "one_liner": "", "tab_ids": [1]}],
+        })
+        request = TabClusterRequest(
+            tabs=[{"id": 1, "title": "React docs", "url": "https://a.test/1"}],
+            projects=[{"name": "React Native App", "intent": ""}],
+        )
+        with patch.object(openai_client, "load_openai_api_key", return_value="unit-test-key"), \
+                patch.object(openai_client.requests, "post", return_value=response):
+            result = openai_client.cluster_tabs(request)
+        self.assertEqual(result["trails"][0]["label"], "React Hooks")
+
 
 if __name__ == "__main__":
     unittest.main()

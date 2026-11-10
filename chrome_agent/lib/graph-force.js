@@ -126,6 +126,12 @@ export function mountGraph(container, model, options = {}) {
     .alphaTarget(0.03)
     .on("tick", draw);
 
+  const degreeById = new Map();
+  for (const edge of links) {
+    degreeById.set(edge.source.id, (degreeById.get(edge.source.id) || 0) + 1);
+    degreeById.set(edge.target.id, (degreeById.get(edge.target.id) || 0) + 1);
+  }
+
   let viewWidth = 1;
   let viewHeight = 1;
   let zoom = 1;
@@ -175,7 +181,7 @@ export function mountGraph(container, model, options = {}) {
     return near;
   }
 
-  function queryMatches() {
+  function directMatches() {
     const query = String(options.getQuery?.() || "").trim().toLowerCase();
     const semanticUrls = options.getSemanticMatches?.() || new Set();
     if (!query && !semanticUrls.size) return null;
@@ -186,6 +192,13 @@ export function mountGraph(container, model, options = {}) {
         matches.add(node.id);
       }
     }
+    return matches;
+  }
+
+  function queryMatches() {
+    const direct = directMatches();
+    if (!direct || !direct.size) return null;
+    const matches = new Set(direct);
     for (const link of links) {
       if (matches.has(link.source.id) || matches.has(link.target.id)) {
         matches.add(link.source.id);
@@ -215,6 +228,12 @@ export function mountGraph(container, model, options = {}) {
   }
 
   function draw() {
+    const searchQuery = String(options.getQuery?.() || "").trim();
+    if (searchQuery !== lastSearchQuery) {
+      lastSearchQuery = searchQuery;
+      if (searchQuery) scheduleSearchFocus();
+      else window.clearTimeout(searchZoomTimer);
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== Math.round(viewWidth * dpr) || canvas.height !== Math.round(viewHeight * dpr)) {
       canvas.width = Math.round(viewWidth * dpr);
@@ -357,6 +376,35 @@ export function mountGraph(container, model, options = {}) {
 
   function cancelZoomToNode() {
     glideToken += 1;
+    window.clearTimeout(searchZoomTimer);
+    searchZoomTimer = 0;
+  }
+
+  let lastSearchQuery = null;
+  let searchZoomTimer = 0;
+
+  function focusSearchBest() {
+    const matches = directMatches();
+    if (!matches || !matches.size) return;
+    let best = null;
+    let bestDegree = -1;
+    for (const node of nodes) {
+      if (!matches.has(node.id)) continue;
+      const degree = degreeById.get(node.id) || 0;
+      if (degree > bestDegree) {
+        best = node;
+        bestDegree = degree;
+      }
+    }
+    if (best) zoomToNode(best);
+  }
+
+  function scheduleSearchFocus() {
+    window.clearTimeout(searchZoomTimer);
+    searchZoomTimer = window.setTimeout(() => {
+      searchZoomTimer = 0;
+      focusSearchBest();
+    }, 400);
   }
 
   function resize() {
@@ -505,6 +553,8 @@ export function mountGraph(container, model, options = {}) {
     destroy() {
       simulation.stop();
       window.clearTimeout(fitTimer);
+      window.clearTimeout(searchZoomTimer);
+      searchZoomTimer = 0;
       observer.disconnect();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -518,6 +568,9 @@ export function mountGraph(container, model, options = {}) {
     },
     redraw() {
       draw();
+    },
+    focusSearch() {
+      focusSearchBest();
     },
   };
 }
