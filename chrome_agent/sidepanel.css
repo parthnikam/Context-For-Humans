@@ -1,0 +1,447 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f1ea;
+  --ink: #1d1a16;
+  --muted: #625c53;
+  --line: #ddd6ca;
+  --card: #fffdf8;
+  --accent: #243f34;
+  --accent-ink: #f4f1ea;
+  --link: #315bd6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141311;
+    --ink: #f3efe7;
+    --muted: #b7b0a4;
+    --line: #2e2a25;
+    --card: #1e1b18;
+    --accent: #d5e3d6;
+    --accent-ink: #17211b;
+    --link: #9ab6ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 280px;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 "Segoe UI", sans-serif;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 14px 10px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 2px 0 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+h2,
+p {
+  margin: 0;
+}
+
+h2 {
+  font-size: 13px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+.file-button,
+.text-button {
+  display: inline-block;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.file-button:focus-within {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+.text-button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.text-button[aria-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.quiet-button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.danger-button {
+  border-color: #b84d43;
+  color: #b84d43;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: color-mix(in srgb, #b84d43 10%, transparent);
+}
+
+.settings {
+  margin: 0 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.settings summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.settings form {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.settings label,
+.source-tools > label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.key-row,
+.tool-row,
+.import-row,
+.graph-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.key-row input,
+select {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 7px 8px;
+}
+
+.key-row input {
+  flex: 1;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 60px);
+  padding: 0 12px 12px;
+}
+
+.source-tools {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.tool-row {
+  flex-wrap: wrap;
+}
+
+select {
+  width: 100%;
+}
+
+.hint,
+.file-name,
+.counts {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.import-row {
+  flex-wrap: wrap;
+  padding-top: 3px;
+}
+
+.file-button {
+  display: inline-block;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+#csv-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+#csv-file:focus-visible + .file-name {
+  outline: 2px solid var(--link);
+}
+
+.status {
+  min-height: 20px;
+  padding: 8px 2px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.graph-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 350px;
+  gap: 8px;
+}
+
+.graph-heading {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.graph {
+  position: relative;
+  flex: 1;
+  min-height: 300px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.graph-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.graph-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.graph-hud {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  pointer-events: none;
+}
+
+.graph-find {
+  pointer-events: auto;
+  width: min(220px, 72%);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  color: inherit;
+  padding: 6px 10px;
+  font: inherit;
+}
+
+.graph-detail {
+  position: absolute;
+  z-index: 1;
+  left: 8px;
+  bottom: 8px;
+  top: 8px;
+  display: flex;
+  width: min(280px, calc(100% - 16px));
+  max-height: none;
+  flex-direction: column;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+
+.graph-detail[hidden] {
+  display: none;
+}
+
+.graph-detail-title {
+  margin: 0;
+  font-weight: 650;
+}
+
+.graph-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.graph-detail-close {
+  flex: none;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.graph-detail .one-liner {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
+.graph-detail-section-title {
+  margin: 10px 0 5px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.graph-detail-links {
+  display: grid;
+  gap: 5px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.graph-project-name {
+  display: flex;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.graph-project-name input,
+.graph-detail-move {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 5px 6px;
+  font: inherit;
+}
+
+.graph-project-name input {
+  flex: 1;
+}
+
+.graph-project-name button {
+  padding: 5px 8px;
+}
+
+.graph-detail-link-row {
+  display: grid;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.graph-detail-link {
+  color: var(--ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.graph-detail-link:hover {
+  text-decoration: underline;
+}
+
+.graph-detail-move {
+  width: 100%;
+  font-size: 11px;
+}
+
+.graph-detail .text {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.empty-graph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+
+.empty-graph {
+  display: grid;
+  height: 100%;
+  min-height: 300px;
+  place-items: center;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}

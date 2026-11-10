@@ -1,5 +1,5 @@
 import { mountErrorBox } from "./lib/errors.js";
-import { dedupeLinks } from "./lib/groups.js";
+import { dedupeLinks, samePage } from "./lib/groups.js";
 import { directTitle, isQuestion, isStopCommand } from "./lib/watch.js";
 import { graphModel } from "./lib/graph-model.js";
 import { fillGraphDetail, mountGraph } from "./lib/graph-view.js";
@@ -467,7 +467,6 @@ function renderAnswer(answer) {
 
 function renderProjects() {
   viewRoot.append(renderGroupButton());
-  renderChromeGroups();
   viewRoot.append(sectionLabel("Suggestions"));
   if (ui.state.suggestions.length === 0) {
     viewRoot.append(empty("No suggestions. Group the active tabs to make one."));
@@ -476,8 +475,19 @@ function renderProjects() {
     viewRoot.append(renderSuggestion(suggestion));
   }
   viewRoot.append(sectionLabel("Filed"));
+  const filedNames = new Set(
+    (ui.state.projects || []).map((project) => String(project.name || "").trim().toLowerCase()),
+  );
   for (const project of topLevelProjects(ui.state)) {
     viewRoot.append(renderProject(project));
+  }
+  if (!ui.live) return;
+  for (const group of ui.state.groups || []) {
+    if (filedNames.has(String(group.title || "").trim().toLowerCase())) continue;
+    viewRoot.append(renderChromeGroup(group));
+  }
+  if ((ui.state.loose || []).length) {
+    viewRoot.append(renderChromeGroup({ title: "Ungrouped", color: "grey", tabs: ui.state.loose }));
   }
 }
 
@@ -556,6 +566,12 @@ function projectBody(project) {
   for (const link of links) {
     list.append(renderLinkRow(link, { movable: true, projectId: project.id, openable: true }));
   }
+  const groupName = String(project.name || "").trim().toLowerCase();
+  const openTabs = (ui.state.groups || [])
+    .filter((group) => String(group.title || "").trim().toLowerCase() === groupName)
+    .flatMap((group) => group.tabs || [])
+    .filter((tab) => !links.some((link) => samePage(link.url, tab.url)));
+  for (const tab of openTabs) list.append(renderOpenTab(tab));
   wrap.append(head, count, list);
   return wrap;
 }
@@ -687,7 +703,9 @@ function renderMoveControl(link, projectId) {
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "tab-remove";
-  remove.textContent = "remove";
+  remove.setAttribute("aria-label", "remove");
+  remove.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.2 4.5h9.6M6.2 4.4V3.2h3.6v1.2M4.4 4.5l.5 8.3h6.2l.5-8.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   remove.addEventListener("click", () => {
     if (ui.live) {
       fileRemove(link);
@@ -838,7 +856,6 @@ function renderGroupButton() {
 
 function renderActive() {
   viewRoot.append(renderGroupButton());
-  renderChromeGroups();
 
   const list = document.createElement("ul");
   list.className = "tabs bare";
@@ -875,17 +892,22 @@ function renderActive() {
   viewRoot.append(list);
 }
 
-function renderChromeGroups() {
-  if (!ui.live) return;
-  const groups = ui.state.groups || [];
-  const loose = groups.length ? ui.state.loose || [] : [];
-  viewRoot.append(sectionLabel("In Chrome"));
-  if (!groups.length) {
-    viewRoot.append(empty("No groups in Chrome."));
-    return;
-  }
-  for (const group of groups) viewRoot.append(renderChromeGroup(group));
-  if (loose.length) viewRoot.append(renderChromeGroup({ title: "Ungrouped", color: "grey", tabs: loose }));
+function renderOpenTab(tab) {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tab";
+  appendFavicon(button, tab);
+  const label = document.createElement("span");
+  label.className = "tab-title";
+  label.textContent = tab.title || tab.url || "Untitled";
+  label.title = tab.title || tab.url || "";
+  button.append(label);
+  button.addEventListener("click", () => {
+    if (Number.isInteger(tab.id)) focusTab(tab.id);
+  });
+  item.append(button);
+  return item;
 }
 
 function renderChromeGroup(group) {
@@ -905,23 +927,7 @@ function renderChromeGroup(group) {
   count.textContent = total === 1 ? "1 tab" : `${total} tabs`;
   const list = document.createElement("ul");
   list.className = "tabs";
-  for (const tab of group.tabs || []) {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "tab";
-    appendFavicon(button, tab);
-    const label = document.createElement("span");
-    label.className = "tab-title";
-    label.textContent = tab.title || tab.url || "Untitled";
-    label.title = tab.title || tab.url || "";
-    button.append(label);
-    button.addEventListener("click", () => {
-      if (Number.isInteger(tab.id)) focusTab(tab.id);
-    });
-    item.append(button);
-    list.append(item);
-  }
+  for (const tab of group.tabs || []) list.append(renderOpenTab(tab));
   card.append(head, count, list);
   return card;
 }

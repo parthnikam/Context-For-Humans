@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "114",
+  "name": "Conversation Exporter",
+  "version": "0.1.0",
+  "description": "Collect conversation links and organize them into project graphs.",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "host_permissions": [
+    "https://api.mem0.ai/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Conversation Exporter"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

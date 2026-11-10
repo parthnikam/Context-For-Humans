@@ -480,7 +480,7 @@ button {
 
 .tab-actions {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   flex: none;
   align-self: center;
@@ -518,7 +518,20 @@ button {
 }
 
 .tab-remove {
+  display: grid;
+  place-items: center;
+  width: 0;
   color: #e05a4f;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.tab-line:hover .tab-remove,
+.tab-line:focus-within .tab-remove {
+  width: 14px;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .one-liner {

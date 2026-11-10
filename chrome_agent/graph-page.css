@@ -1,0 +1,28 @@
+body.graph-page {
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.graph-page main {
+  flex: 1;
+  min-height: 0;
+  padding: 0 16px 16px;
+}
+
+.graph-page .graph-section {
+  min-height: 0;
+}
+
+.graph-page .graph {
+  min-height: 0;
+}
+
+.graph-page .graph-section {
+  position: relative;
+}
+
+.graph-page .graph-detail {
+  width: min(320px, calc(100% - 16px));
+}

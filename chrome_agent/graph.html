@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project graph — Conversation Exporter</title>
+    <link rel="stylesheet" href="sidepanel.css">
+    <link rel="stylesheet" href="graph-page.css">
+  </head>
+  <body class="graph-page">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Conversation Exporter</p>
+        <h1>Project graph</h1>
+      </div>
+      <span id="counts" class="counts">Loading graph...</span>
+    </header>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <main>
+      <section class="graph-section" aria-label="Conversation project graph">
+        <div id="graph" class="graph"></div>
+        <div id="project-detail" class="graph-detail" hidden></div>
+      </section>
+    </main>
+    <script type="module" src="graph-page.js"></script>
+  </body>
+</html>

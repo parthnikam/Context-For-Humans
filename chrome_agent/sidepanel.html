@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conversation Projects</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <p class="eyebrow">Conversation Exporter</p>
+        <h1>Project graph</h1>
+      </div>
+      <button id="settings-toggle" class="text-button" type="button" aria-expanded="false">AI keys</button>
+    </header>
+
+    <details id="settings" class="settings">
+      <summary>AI grouping settings</summary>
+      <form id="mem0-key-form">
+        <label for="mem0-api-key">Mem0 API key</label>
+        <div class="key-row">
+          <input id="mem0-api-key" type="password" autocomplete="off" placeholder="Enter your Mem0 API key">
+          <button id="test-mem0-key" class="quiet-button" type="button">Test</button>
+          <button type="submit">Save</button>
+        </div>
+        <p class="hint">Mem0 receives conversation titles to build similarity groups. Each import or extraction is isolated to its own run.</p>
+      </form>
+      <form id="key-form">
+        <label for="api-key">Google AI Studio API key for Gemma</label>
+        <div class="key-row">
+          <input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key">
+          <button id="test-gemini-key" class="quiet-button" type="button">Test</button>
+          <button type="submit">Save</button>
+        </div>
+        <p class="hint">Gemma only names the clusters Mem0 finds; it does not decide which conversations belong together. Keys are stored locally in this extension.</p>
+      </form>
+    </details>
+
+    <main>
+      <section class="source-tools" aria-label="Add conversations">
+        <div class="tool-row">
+          <button id="detect-areas" type="button">Detect chat list</button>
+          <button id="extract" type="button" disabled>Extract &amp; group</button>
+          <button id="cancel" class="quiet-button" type="button" hidden>Cancel</button>
+        </div>
+        <label for="area-select">Scrollable area</label>
+        <select id="area-select" disabled>
+          <option value="">Detect a chat list first</option>
+        </select>
+        <p class="hint">Choose a detected area to highlight it, then extract conversations.</p>
+
+        <div class="import-row">
+          <label class="file-button" for="csv-file">Import title,url CSV</label>
+          <input id="csv-file" type="file" accept=".csv,text/csv">
+          <span id="file-name" class="file-name">or choose a CSV</span>
+        </div>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite">Import a CSV or detect a chat list to begin.</p>
+      <section class="graph-section" aria-label="Conversation project graph">
+        <div class="graph-heading">
+          <h2>Projects and conversations</h2>
+          <span id="counts" class="counts">No data</span>
+          <a id="view-larger" class="text-button" href="graph.html" target="_blank" rel="noopener" aria-disabled="true">View larger</a>
+          <button id="download" class="text-button" type="button" disabled>Download CSV</button>
+          <button id="clear-graphs" class="text-button danger-button" type="button" disabled>Clear graphs</button>
+        </div>
+        <div id="graph" class="graph"></div>
+        <div id="project-detail" class="graph-detail" hidden></div>
+      </section>
+    </main>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
