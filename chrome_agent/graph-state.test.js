@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { moveConversation, renameProject } from "./graph-state.js";
+import { appendGraphData, moveConversation, renameProject } from "./graph-state.js";
 
 const projects = [
   {
@@ -34,5 +34,44 @@ assert.throws(
   /no longer belongs/,
 );
 assert.equal(moveConversation(projects, "p1", "p1", "https://example.test/a"), projects);
+
+const appended = appendGraphData(
+  projects,
+  [
+    { title: "Conversation A", url: "https://example.test/a#old" },
+    { title: "Conversation B", url: "https://example.test/b" },
+    { title: "Conversation C", url: "https://example.test/c" },
+  ],
+  [
+    {
+      id: "project-1",
+      name: "Old name",
+      intent: "Merged intent",
+      links: [
+        { title: "New conversation", url: "https://example.test/new" },
+        { title: "Duplicate URL", url: "https://example.test/a#new" },
+      ],
+    },
+    {
+      id: "p2",
+      name: "Fresh project",
+      intent: "",
+      links: [{ title: "Fresh link", url: "https://example.test/fresh" }],
+    },
+  ],
+  [
+    { title: "New conversation", url: "https://example.test/new" },
+    { title: "Duplicate URL", url: "https://example.test/a#new" },
+    { title: "Fresh link", url: "https://example.test/fresh" },
+  ],
+);
+assert.equal(appended.projects.length, 3);
+assert.equal(appended.projects[0].links.length, 3);
+assert.equal(appended.projects[1].id, "p2");
+assert.notEqual(appended.projects[2].id, "p2");
+assert.equal(appended.conversations.length, 5);
+assert.ok(appended.conversations.some((item) => item.url === "https://example.test/fresh"));
+assert.equal(appended.projects[0].links.filter((link) => link.url.includes("/a")).length, 1);
+assert.equal(projects[0].links.length, 2, "append does not mutate prior graph data");
 
 console.log("Graph rename and conversation reassignment checks passed.");

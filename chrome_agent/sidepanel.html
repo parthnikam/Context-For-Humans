@@ -17,15 +17,13 @@
 
     <details id="settings" class="settings">
       <summary>AI grouping settings</summary>
-      <form id="mem0-key-form">
-        <label for="mem0-api-key">Mem0 API key</label>
-        <div class="key-row">
-          <input id="mem0-api-key" type="password" autocomplete="off" placeholder="Enter your Mem0 API key">
-          <button id="test-mem0-key" class="quiet-button" type="button">Test</button>
-          <button type="submit">Save</button>
+      <div class="service-row">
+        <div>
+          <strong>Local ChromaDB</strong>
+          <p class="hint">Persistent vector index stored on this computer.</p>
         </div>
-        <p class="hint">Mem0 receives conversation titles to build similarity groups. Each import or extraction is isolated to its own run.</p>
-      </form>
+        <button id="test-chroma" class="quiet-button" type="button">Test service</button>
+      </div>
       <form id="key-form">
         <label for="api-key">Google AI Studio API key for Gemma</label>
         <div class="key-row">
@@ -33,8 +31,15 @@
           <button id="test-gemini-key" class="quiet-button" type="button">Test</button>
           <button type="submit">Save</button>
         </div>
-        <p class="hint">Gemma only names the clusters Mem0 finds; it does not decide which conversations belong together. Keys are stored locally in this extension.</p>
+        <p class="hint">Gemma compares new clusters with existing project names and titles, then reuses or creates a project. The key is stored locally in this extension.</p>
       </form>
+      <div class="threshold-control">
+        <label for="similarity-threshold">Chroma cosine similarity threshold</label>
+        <div class="threshold-row">
+          <input id="similarity-threshold" type="number" min="0" max="1" step="0.05" value="0.62">
+          <span class="hint">0–1; lower values create broader groups</span>
+        </div>
+      </div>
     </details>
 
     <main>
@@ -48,8 +53,6 @@
         <select id="area-select" disabled>
           <option value="">Detect a chat list first</option>
         </select>
-        <p class="hint">Choose a detected area to highlight it, then extract conversations.</p>
-
         <div class="import-row">
           <label class="file-button" for="csv-file">Import title,url CSV</label>
           <input id="csv-file" type="file" accept=".csv,text/csv">
@@ -58,6 +61,16 @@
       </section>
 
       <p id="status" class="status" role="status" aria-live="polite">Import a CSV or detect a chat list to begin.</p>
+      <details id="debug-console" class="debug-console">
+        <summary>
+          <span>API debug console</span>
+          <span id="debug-count" class="counts">0 records</span>
+        </summary>
+        <div class="debug-tools">
+          <button id="clear-debug" class="quiet-button" type="button">Clear log</button>
+        </div>
+        <pre id="debug-output" class="debug-output" aria-live="polite">ChromaDB and Gemini requests will appear here during grouping.</pre>
+      </details>
       <section class="graph-section" aria-label="Conversation project graph">
         <div class="graph-heading">
           <h2>Projects and conversations</h2>

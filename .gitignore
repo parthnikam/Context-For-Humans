@@ -1,2 +1,5 @@
 .env
 .vscode
+chroma_service/data/
+__pycache__/
+*.py[cod]

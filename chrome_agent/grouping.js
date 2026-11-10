@@ -1,43 +1,232 @@
-const MEM0_HOST = "https://api.mem0.ai";
+const CHROMA_API = "http://127.0.0.1:8765";
 const GEMINI_HOST = "https://generativelanguage.googleapis.com/v1beta/models";
-const MEM0_USER_ID = "conversation-exporter";
-const MEM0_SIMILARITY_THRESHOLD = 0.6;
-const MEM0_CONCURRENCY = 8;
-const MEM0_SEARCH_LIMIT = 100;
-const MEM0_POLL_INTERVAL_MS = 1000;
-const MEM0_EVENT_TIMEOUT_MS = 120000;
 const GEMMA_MODELS = ["gemma-4-26b-a4b-it", "gemma-4-31b-it"];
-const GEMMA_BATCH_SIZE = 40;
-const GEMMA_BATCH_CHAR_LIMIT = 25000;
-const TITLES_PER_CLUSTER = 12;
+const CLUSTER_BATCH_SIZE = 25;
 
-const GROUP_SCHEMA = {
+export const DEFAULT_SIMILARITY_THRESHOLD = 0.62;
+
+const ASSIGNMENT_SCHEMA = {
   type: "object",
   properties: {
-    groups: {
+    assignments: {
       type: "array",
       items: {
         type: "object",
         properties: {
-          id: { type: "integer" },
-          name: { type: "string" },
+          cluster_id: { type: "string" },
+          existing_project_id: { type: "string" },
+          project_name: { type: "string" },
           intent: { type: "string" },
         },
-        required: ["id", "name", "intent"],
+        required: ["cluster_id", "existing_project_id", "project_name", "intent"],
       },
     },
   },
-  required: ["groups"],
+  required: ["assignments"],
 };
 
-export async function testMem0Key(apiKey, options = {}) {
-  const key = String(apiKey || "").trim();
-  if (!key) throw new Error("Enter a Mem0 API key to test.");
-  await requestJson(options.fetch ?? globalThis.fetch, `${MEM0_HOST}/v1/ping/`, {
-    method: "GET",
-    headers: { Authorization: `Token ${key}` },
-  }, "Mem0");
-  return { ok: true };
+export async function testChromaService(options = {}) {
+  const data = await requestJson(
+    options.fetch ?? globalThis.fetch,
+    `${CHROMA_API}/health`,
+    { method: "GET" },
+    "ChromaDB",
+    options.onDebug,
+    "Check local Chroma service",
+  );
+  if (!data.ok) throw new Error("The local ChromaDB service did not report ready.");
+  return data;
+}
+
+export async function clearChromaIndex(options = {}) {
+  return requestJson(
+    options.fetch ?? globalThis.fetch,
+    `${CHROMA_API}/clear`,
+    { method: "POST" },
+    "ChromaDB",
+    options.onDebug,
+    "Clear local Chroma index",
+  );
+}
+
+export async function syncProjectAssignments(assignments, options = {}) {
+  if (!assignments.length) return { updated: 0 };
+  return requestJson(
+    options.fetch ?? globalThis.fetch,
+    `${CHROMA_API}/assign`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignments }),
+    },
+    "ChromaDB",
+    options.onDebug,
+    "Save project assignments in Chroma",
+  );
+}
+
+export async function groupConversations({
+  geminiApiKey,
+  conversations,
+  existingProjects = [],
+  onStatus = () => {},
+  onDebug = () => {},
+  fetch: doFetch = globalThis.fetch,
+  similarityThreshold = DEFAULT_SIMILARITY_THRESHOLD,
+} = {}) {
+  const apiKey = String(geminiApiKey || "").trim();
+  if (!apiKey) throw new Error("Save a Gemini API key in AI grouping settings first.");
+  if (!Array.isArray(conversations) || !conversations.length) {
+    throw new Error("There are no conversations to group.");
+  }
+  if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
+    throw new Error("The Chroma cosine similarity threshold must be between 0 and 1.");
+  }
+
+  onStatus(`Finding persistent title similarities in ChromaDB (${conversations.length} titles)...`);
+  const clustered = await requestJson(doFetch, `${CHROMA_API}/cluster`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      conversations,
+      similarity_threshold: similarityThreshold,
+    }),
+  }, "ChromaDB", onDebug, "Cluster conversation titles");
+  if (!Array.isArray(clustered.clusters)) {
+    throw new Error("ChromaDB did not return a clusters list.");
+  }
+
+  const clusters = clustered.clusters;
+  const normalizedProjects = existingProjects.map((project) => ({
+    id: String(project.id),
+    name: String(project.name || "").trim(),
+    intent: String(project.intent || "").trim(),
+    example_titles: (project.links || [])
+      .slice(0, 3)
+      .map((link) => String(link.title || "").trim())
+      .filter(Boolean),
+  }));
+  const assigned = [];
+  const seenClusterIds = new Set();
+  for (let offset = 0; offset < clusters.length; offset += CLUSTER_BATCH_SIZE) {
+    const batch = clusters.slice(offset, offset + CLUSTER_BATCH_SIZE);
+    onStatus(`Asking Gemma to assign projects (${Math.floor(offset / CLUSTER_BATCH_SIZE) + 1}/${Math.ceil(clusters.length / CLUSTER_BATCH_SIZE)})...`);
+    const response = await assignClusters(apiKey, batch, normalizedProjects, doFetch, onDebug);
+    assigned.push(...response);
+    for (const assignment of response) {
+      if (seenClusterIds.has(assignment.cluster_id)) {
+        throw new Error(`ChromaDB returned duplicate cluster id ${assignment.cluster_id}.`);
+      }
+      seenClusterIds.add(assignment.cluster_id);
+    }
+  }
+
+  const projectById = new Map(normalizedProjects.map((project) => [project.id, project]));
+  const resultByProject = new Map();
+  for (const assignment of assigned) {
+    const cluster = clusters.find((item) => item.cluster_id === assignment.cluster_id);
+    if (!cluster) throw new Error(`Gemma assigned unknown Chroma cluster ${assignment.cluster_id}.`);
+    const existing = projectById.get(assignment.existing_project_id);
+    const projectId = existing?.id || `new:${assignment.cluster_id}`;
+    const name = existing?.name || String(assignment.project_name || "").trim();
+    if (!name) throw new Error(`Gemma did not name new cluster ${assignment.cluster_id}.`);
+    const project = resultByProject.get(projectId) || {
+      id: projectId,
+      name,
+      intent: existing?.intent || String(assignment.intent || "").trim(),
+      links: [],
+    };
+    project.links.push(...cluster.conversations);
+    if (!project.intent && assignment.intent) project.intent = assignment.intent;
+    resultByProject.set(projectId, project);
+  }
+
+  return [...resultByProject.values()];
+}
+
+async function assignClusters(apiKey, clusters, existingProjects, doFetch, onDebug) {
+  const payload = {
+    existing_projects: existingProjects,
+    incoming_clusters: clusters.map((cluster) => ({
+      cluster_id: String(cluster.cluster_id),
+      titles: (cluster.conversations || []).map((item) => item.title),
+      similar_existing_projects: cluster.existing_project_candidates || [],
+    })),
+  };
+  const prompt = [
+    "You organize chat conversation titles into durable projects.",
+    "The incoming clusters were created by a persistent local ChromaDB vector index. Their membership is fixed; never split, merge, or move conversations between clusters.",
+    "For every incoming cluster, either assign it to exactly one existing project or create a new project.",
+    "Reuse an existing project only when the titles clearly refer to the same ongoing work. Similar wording or the same chat provider alone is not enough.",
+    "Use similar_existing_projects as useful evidence, not as a requirement. Also compare against every existing project name and example title.",
+    "If no existing project is a clear fit, set existing_project_id to an empty string and provide a concise, specific project_name and a one-sentence intent.",
+    "When reusing an existing project, return its exact id and leave project_name empty. Do not invent project ids.",
+    "Return exactly one assignment per incoming cluster, preserving each cluster_id exactly.",
+    "",
+    "Existing projects and representative titles:",
+    JSON.stringify(payload.existing_projects),
+    "",
+    "Incoming fixed clusters and ChromaDB matches:",
+    JSON.stringify(payload.incoming_clusters),
+  ].join("\n");
+  const body = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: ASSIGNMENT_SCHEMA,
+      thinkingConfig: { thinkingLevel: "minimal" },
+    },
+  };
+  let text;
+  try {
+    text = await generateWithFallback(apiKey, body, doFetch, onDebug, "Assign incoming clusters");
+  } catch (error) {
+    if (![400, 500, 503].includes(error.status)) throw error;
+    text = await generateWithFallback(apiKey, {
+      contents: [{
+        role: "user",
+        parts: [{ text: `${prompt}\n\nReturn one JSON object only.` }],
+      }],
+    }, doFetch, onDebug, "Assign incoming clusters fallback");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Gemma returned invalid JSON while assigning project groups.");
+  }
+  if (!Array.isArray(parsed?.assignments) || parsed.assignments.length !== clusters.length) {
+    throw new Error(`Gemma returned ${parsed?.assignments?.length || 0} assignments for ${clusters.length} clusters.`);
+  }
+
+  const expected = new Map(clusters.map((cluster) => [String(cluster.cluster_id), cluster]));
+  const outputById = new Map(parsed.assignments.map((item) => [String(item?.cluster_id || ""), item]));
+  const idsAreValid = outputById.size === clusters.length &&
+    [...outputById.keys()].every((id) => expected.has(id));
+  const ordered = idsAreValid
+    ? clusters.map((cluster) => outputById.get(String(cluster.cluster_id)))
+    : parsed.assignments;
+  if (!idsAreValid) {
+    onDebug({
+      service: "Gemini",
+      stage: "Validate project assignments",
+      direction: "warning",
+      payload: { message: "Invalid or duplicate cluster IDs; mapped complete response in input order." },
+    });
+  }
+
+  const existingIds = new Set(existingProjects.map((project) => project.id));
+  return ordered.map((item, index) => {
+    const clusterId = String(clusters[index].cluster_id);
+    const requestedProjectId = String(item?.existing_project_id || "");
+    const existingProjectId = existingIds.has(requestedProjectId) ? requestedProjectId : "";
+    return {
+      cluster_id: clusterId,
+      existing_project_id: existingProjectId,
+      project_name: existingProjectId ? "" : String(item?.project_name || "").trim(),
+      intent: String(item?.intent || "").trim(),
+    };
+  });
 }
 
 export async function testGeminiKey(apiKey, options = {}) {
@@ -45,265 +234,11 @@ export async function testGeminiKey(apiKey, options = {}) {
   if (!key) throw new Error("Enter a Gemini API key to test.");
   await generateWithFallback(key, {
     contents: [{ role: "user", parts: [{ text: "Reply with the single word ok." }] }],
-  }, options.fetch ?? globalThis.fetch);
+  }, options.fetch ?? globalThis.fetch, options.onDebug, "Test Gemini API key");
   return { ok: true };
 }
 
-export async function groupConversations({
-  mem0ApiKey,
-  geminiApiKey,
-  conversations,
-  onStatus = () => {},
-  fetch: doFetch = globalThis.fetch,
-  similarityThreshold = MEM0_SIMILARITY_THRESHOLD,
-  pollIntervalMs = MEM0_POLL_INTERVAL_MS,
-  eventTimeoutMs = MEM0_EVENT_TIMEOUT_MS,
-} = {}) {
-  const mem0Key = String(mem0ApiKey || "").trim();
-  const geminiKey = String(geminiApiKey || "").trim();
-  if (!mem0Key) throw new Error("Save a Mem0 API key in AI grouping settings first.");
-  if (!geminiKey) throw new Error("Save a Gemini API key in AI grouping settings first.");
-  if (!Array.isArray(conversations) || !conversations.length) {
-    throw new Error("There are no conversations to group.");
-  }
-  if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
-    throw new Error("The Mem0 similarity threshold must be between 0 and 1.");
-  }
-
-  const runId = globalThis.crypto?.randomUUID?.();
-  if (!runId) throw new Error("This browser cannot create a secure Mem0 run identifier.");
-
-  onStatus(`Indexing ${conversations.length} titles in Mem0...`);
-  const eventIds = await mapLimit(conversations, MEM0_CONCURRENCY, async (conversation, index) => {
-    const data = await requestJson(doFetch, `${MEM0_HOST}/v3/memories/add/`, {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${mem0Key}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        messages: [{ role: "user", content: conversation.title }],
-        user_id: MEM0_USER_ID,
-        run_id: runId,
-        infer: false,
-        metadata: { source: "chrome_agent", conversation_index: index },
-      }),
-    }, "Mem0");
-    if (!data.event_id) throw new Error(`Mem0 did not return an indexing event for title ${index + 1}.`);
-    return { eventId: data.event_id, status: data.status };
-  });
-
-  onStatus("Waiting for Mem0 to finish indexing conversation titles...");
-  await mapLimit(eventIds, MEM0_CONCURRENCY, ({ eventId, status }) => {
-    if (status === "SUCCEEDED") return Promise.resolve();
-    return waitForMem0Event(doFetch, mem0Key, eventId, pollIntervalMs, eventTimeoutMs);
-  });
-
-  let searched = 0;
-  onStatus("Finding similar titles with Mem0...");
-  const similarityResults = await mapLimit(conversations, MEM0_CONCURRENCY, async (conversation, index) => {
-    const data = await requestJson(doFetch, `${MEM0_HOST}/v3/memories/search/`, {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${mem0Key}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        query: conversation.title,
-        filters: { user_id: MEM0_USER_ID, run_id: runId },
-        top_k: Math.min(conversations.length, MEM0_SEARCH_LIMIT),
-        threshold: similarityThreshold,
-        rerank: false,
-      }),
-    }, "Mem0");
-    const results = Array.isArray(data.results) ? data.results : [];
-    const ownRecordFound = results.some((result) =>
-      Number(result?.metadata?.conversation_index) === index
-    );
-    if (!ownRecordFound) {
-      throw new Error(`Mem0 did not return title ${index + 1} in its own similarity search.`);
-    }
-    searched += 1;
-    if (searched % 25 === 0 || searched === conversations.length) {
-      onStatus(`Finding similar titles with Mem0 (${searched}/${conversations.length})...`);
-    }
-    return results.map((result) => ({
-      sourceIndex: index,
-      targetIndex: Number(result?.metadata?.conversation_index),
-      score: Number(result?.score),
-    })).filter((result) =>
-      Number.isInteger(result.targetIndex) &&
-      result.targetIndex >= 0 &&
-      result.targetIndex < conversations.length &&
-      result.targetIndex !== index &&
-      Number.isFinite(result.score) &&
-      result.score >= similarityThreshold
-    );
-  });
-
-  const clusters = clusterBySimilarity(conversations.length, similarityResults);
-  const namedProjects = await nameClusters(geminiKey, clusters, conversations, {
-    fetch: doFetch,
-    onStatus,
-  });
-  return namedProjects.map((project, index) => ({
-    id: `project-${index + 1}`,
-    name: project.name,
-    intent: project.intent,
-    links: project.indices.map((conversationIndex) => conversations[conversationIndex]),
-  }));
-}
-
-export function clusterBySimilarity(itemCount, similarityResults) {
-  const parent = Array.from({ length: itemCount }, (_, index) => index);
-  const rank = Array(itemCount).fill(0);
-  const find = (value) => {
-    if (parent[value] !== value) parent[value] = find(parent[value]);
-    return parent[value];
-  };
-  const union = (left, right) => {
-    let leftRoot = find(left);
-    let rightRoot = find(right);
-    if (leftRoot === rightRoot) return;
-    if (rank[leftRoot] < rank[rightRoot]) [leftRoot, rightRoot] = [rightRoot, leftRoot];
-    parent[rightRoot] = leftRoot;
-    if (rank[leftRoot] === rank[rightRoot]) rank[leftRoot] += 1;
-  };
-
-  for (const resultSet of similarityResults) {
-    for (const result of resultSet) union(result.sourceIndex, result.targetIndex);
-  }
-
-  const clustersByRoot = new Map();
-  for (let index = 0; index < itemCount; index += 1) {
-    const root = find(index);
-    const indices = clustersByRoot.get(root) || [];
-    indices.push(index);
-    clustersByRoot.set(root, indices);
-  }
-  return [...clustersByRoot.values()];
-}
-
-async function nameClusters(apiKey, clusters, conversations, { fetch: doFetch, onStatus }) {
-  const namesById = new Map();
-  const multiLinkClusters = [];
-  for (const [id, indices] of clusters.entries()) {
-    if (indices.length > 1) {
-      multiLinkClusters.push({ id, indices });
-      continue;
-    }
-    const title = String(conversations[indices[0]]?.title || "").trim();
-    namesById.set(id, {
-      name: title.slice(0, 80) || "Unrelated conversation",
-      intent: "No other conversation title met the Mem0 similarity threshold.",
-    });
-  }
-
-  const batches = makeGemmaBatches(multiLinkClusters, conversations);
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-    const batch = batches[batchIndex];
-    onStatus(`Naming Mem0 clusters with Gemma (${batchIndex + 1}/${batches.length})...`);
-    const response = await generateJson(apiKey, batch, doFetch);
-    const expectedIds = new Set(batch.map((cluster) => cluster.id));
-    for (const group of response.groups) {
-      if (!Number.isInteger(group?.id) || !expectedIds.has(group.id) || namesById.has(group.id)) {
-        throw new Error("Gemma returned an invalid or duplicate cluster id.");
-      }
-      const name = String(group.name || "").trim();
-      if (!name) throw new Error(`Gemma did not provide a name for similarity cluster ${group.id + 1}.`);
-      namesById.set(group.id, {
-        name,
-        intent: String(group.intent || "").trim(),
-      });
-    }
-  }
-
-  if (namesById.size !== clusters.length) {
-    throw new Error("Gemma did not return a title for every Mem0 similarity cluster.");
-  }
-  return clusters.map((indices, id) => ({
-    ...namesById.get(id),
-    indices,
-  }));
-}
-
-function makeGemmaBatches(clusters, conversations) {
-  const batches = [];
-  let batch = [];
-  let charCount = 0;
-  for (const { id, indices } of clusters) {
-    const titles = [];
-    const seen = new Set();
-    for (const index of indices) {
-      const title = String(conversations[index].title || "").trim().slice(0, 240);
-      const key = title.toLocaleLowerCase();
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-      titles.push(title);
-      if (titles.length === TITLES_PER_CLUSTER) break;
-    }
-    const cluster = { id, titles: titles.length ? titles : ["Untitled conversation"] };
-    const clusterSize = JSON.stringify(cluster).length;
-    if (batch.length && (
-      batch.length >= GEMMA_BATCH_SIZE ||
-      charCount + clusterSize > GEMMA_BATCH_CHAR_LIMIT
-    )) {
-      batches.push(batch);
-      batch = [];
-      charCount = 0;
-    }
-    batch.push(cluster);
-    charCount += clusterSize;
-  }
-  if (batch.length) batches.push(batch);
-  return batches;
-}
-
-async function generateJson(apiKey, batch, doFetch) {
-  const prompt = [
-    "Give each supplied conversation cluster a short, descriptive project name and one-sentence intent.",
-    "The clusters were already formed by Mem0 similarity. Do not merge, split, move, or omit clusters.",
-    "Return exactly one result for every input id, preserving its id.",
-    "",
-    "Clusters (id and representative conversation titles):",
-    JSON.stringify(batch),
-  ].join("\n");
-  const structuredBody = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseJsonSchema: GROUP_SCHEMA,
-      thinkingConfig: { thinkingLevel: "minimal" },
-    },
-  };
-
-  let response;
-  try {
-    response = await generateWithFallback(apiKey, structuredBody, doFetch);
-  } catch (error) {
-    if (![400, 500, 503].includes(error.status)) throw error;
-    response = await generateWithFallback(apiKey, {
-      contents: [{
-        role: "user",
-        parts: [{ text: `${prompt}\n\nReply with one JSON object and no other text.` }],
-      }],
-    }, doFetch);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(response);
-  } catch {
-    throw new Error("Gemma returned invalid JSON for similarity cluster names.");
-  }
-  if (!Array.isArray(parsed?.groups)) {
-    throw new Error("Gemma response did not contain a groups list.");
-  }
-  return parsed;
-}
-
-async function generateWithFallback(apiKey, body, doFetch) {
+async function generateWithFallback(apiKey, body, doFetch, onDebug = () => {}, stage = "Gemini request") {
   let lastError;
   for (const model of GEMMA_MODELS) {
     try {
@@ -316,6 +251,8 @@ async function generateWithFallback(apiKey, body, doFetch) {
           body: JSON.stringify(body),
         },
         "Gemini",
+        onDebug,
+        `${stage} (${model})`,
       );
       const text = (data?.candidates?.[0]?.content?.parts || [])
         .filter((part) => part?.text && !part.thought)
@@ -324,7 +261,7 @@ async function generateWithFallback(apiKey, body, doFetch) {
         .trim()
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```$/, "");
-      if (!text) throw new Error("Gemini returned no project names.");
+      if (!text) throw new Error("Gemini returned no project assignments.");
       return text;
     } catch (error) {
       lastError = error;
@@ -334,31 +271,31 @@ async function generateWithFallback(apiKey, body, doFetch) {
   throw lastError || new Error("Gemini request failed.");
 }
 
-async function waitForMem0Event(doFetch, apiKey, eventId, pollIntervalMs, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await delay(pollIntervalMs);
-    const event = await requestJson(
-      doFetch,
-      `${MEM0_HOST}/v1/event/${encodeURIComponent(eventId)}/`,
-      { method: "GET", headers: { Authorization: `Token ${apiKey}` } },
-      "Mem0",
-    );
-    const status = String(event?.status || event?.event?.status || "").toUpperCase();
-    if (status === "SUCCEEDED") return;
-    if (status === "FAILED") throw new Error(`Mem0 failed to index event ${eventId}.`);
-  }
-  throw new Error(`Timed out while waiting for Mem0 to index event ${eventId}.`);
-}
-
-async function requestJson(doFetch, url, init, service) {
+async function requestJson(doFetch, url, init, service, onDebug = () => {}, stage = "API request") {
+  const parsedUrl = new URL(url);
+  const request = {
+    method: init?.method || "GET",
+    endpoint: `${parsedUrl.origin}${parsedUrl.pathname}`,
+    payload: parseRequestBody(init?.body),
+  };
+  onDebug({ service, stage, direction: "request", payload: request });
   let response;
   try {
     response = await doFetch(url, init);
   } catch {
-    throw new Error(`Could not reach ${service}.`);
+    const message = service === "ChromaDB"
+      ? "Could not reach the local ChromaDB service. Start it with the command in chrome_agent/README.md."
+      : `Could not reach ${service}.`;
+    onDebug({ service, stage, direction: "error", payload: { message } });
+    throw new Error(message);
   }
   const data = await response.json().catch(() => ({}));
+  onDebug({
+    service,
+    stage,
+    direction: "response",
+    payload: { status: response.status, ok: response.ok, body: data },
+  });
   if (!response.ok) {
     const detail = data?.error?.message || data?.detail || data?.error || data?.message;
     const message = typeof detail === "string" ? detail : `${service} request failed (${response.status}).`;
@@ -369,21 +306,11 @@ async function requestJson(doFetch, url, init, service) {
   return data;
 }
 
-async function mapLimit(items, concurrency, callback) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-  async function worker() {
-    while (true) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= items.length) return;
-      results[index] = await callback(items[index], index);
-    }
+function parseRequestBody(body) {
+  if (typeof body !== "string") return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return results;
-}
-
-function delay(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

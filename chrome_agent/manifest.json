@@ -6,7 +6,7 @@
   "description": "Collect conversation links and organize them into project graphs.",
   "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
   "host_permissions": [
-    "https://api.mem0.ai/*",
+    "http://127.0.0.1:8765/*",
     "https://generativelanguage.googleapis.com/*"
   ],
   "background": {

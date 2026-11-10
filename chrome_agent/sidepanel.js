@@ -1,15 +1,23 @@
 import { parseConversationCsv } from "./csv.js";
 import { extractConversations } from "./extraction.js";
-import { groupConversations, testGeminiKey, testMem0Key } from "./grouping.js";
+import {
+  clearChromaIndex,
+  DEFAULT_SIMILARITY_THRESHOLD,
+  groupConversations,
+  syncProjectAssignments,
+  testGeminiKey,
+  testChromaService,
+} from "./grouping.js";
 import { openGraphNode } from "./graph-actions.js";
 import { renderGraph } from "./graph-view.js";
-import { moveConversation, renameProject } from "./graph-state.js";
+import { appendGraphData, moveConversation, renameProject } from "./graph-state.js";
 import { runPageAction } from "./page-actions.js";
 import { createCsvDownload } from "./csv-download.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const GEMINI_KEY = "conversationGeminiApiKey";
-const MEM0_KEY = "conversationMem0ApiKey";
+const LEGACY_MEM0_KEY = "conversationMem0ApiKey";
+const SIMILARITY_THRESHOLD_KEY = "chromaSimilarityThreshold";
 
 const scanButton = document.querySelector("#detect-areas");
 const areaSelect = document.querySelector("#area-select");
@@ -23,14 +31,17 @@ const graph = document.querySelector("#graph");
 const detail = document.querySelector("#project-detail");
 const settings = document.querySelector("#settings");
 const apiKeyInput = document.querySelector("#api-key");
-const mem0ApiKeyInput = document.querySelector("#mem0-api-key");
+const similarityThresholdInput = document.querySelector("#similarity-threshold");
 const downloadButton = document.querySelector("#download");
 const viewLargerLink = document.querySelector("#view-larger");
+const debugOutput = document.querySelector("#debug-output");
+const debugCount = document.querySelector("#debug-count");
 
 let areas = [];
 let projects = [];
 let conversations = [];
 let graphSource = "";
+let debugEntries = [];
 let cancelled = false;
 let busy = false;
 
@@ -44,10 +55,11 @@ cancelButton.addEventListener("click", () => {
 csvInput.addEventListener("change", importCsv);
 downloadButton.addEventListener("click", () => createCsvDownload(conversations));
 document.querySelector("#key-form").addEventListener("submit", saveApiKey);
-document.querySelector("#mem0-key-form").addEventListener("submit", saveMem0ApiKey);
-document.querySelector("#test-mem0-key").addEventListener("click", testMem0ApiKey);
 document.querySelector("#test-gemini-key").addEventListener("click", testGeminiApiKey);
+document.querySelector("#test-chroma").addEventListener("click", testChromaServiceConnection);
 document.querySelector("#clear-graphs").addEventListener("click", clearGraphs);
+document.querySelector("#clear-debug").addEventListener("click", clearDebug);
+similarityThresholdInput.addEventListener("change", saveSimilarityThreshold);
 document.querySelector("#settings-toggle").addEventListener("click", () => {
   settings.open = !settings.open;
   document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(settings.open));
@@ -57,9 +69,10 @@ initialize();
 
 async function initialize() {
   try {
-    const stored = await chrome.storage.local.get([STORAGE_KEY, GEMINI_KEY, MEM0_KEY]);
+    const stored = await chrome.storage.local.get([STORAGE_KEY, GEMINI_KEY, SIMILARITY_THRESHOLD_KEY]);
+    await chrome.storage.local.remove(LEGACY_MEM0_KEY);
     apiKeyInput.value = String(stored[GEMINI_KEY] || "");
-    mem0ApiKeyInput.value = String(stored[MEM0_KEY] || "");
+    similarityThresholdInput.value = String(readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]));
     const saved = stored[STORAGE_KEY];
     if (saved && Array.isArray(saved.projects) && Array.isArray(saved.conversations)) {
       projects = saved.projects;
@@ -88,41 +101,6 @@ async function saveApiKey(event) {
   }
 }
 
-async function saveMem0ApiKey(event) {
-  event.preventDefault();
-  const key = mem0ApiKeyInput.value.trim();
-  if (!key) {
-    setStatus("Enter a Mem0 API key to save.");
-    return;
-  }
-  try {
-    await chrome.storage.local.set({ [MEM0_KEY]: key });
-    setStatus("Mem0 API key saved locally.");
-  } catch (error) {
-    setStatus(`Could not save Mem0 API key: ${error.message}`);
-  }
-}
-
-async function testMem0ApiKey() {
-  const key = mem0ApiKeyInput.value.trim();
-  if (!key) {
-    setStatus("Enter a Mem0 API key to test.");
-    mem0ApiKeyInput.focus();
-    return;
-  }
-  const testButton = document.querySelector("#test-mem0-key");
-  testButton.disabled = true;
-  setStatus("Testing Mem0 API key...");
-  try {
-    await testMem0Key(key);
-    setStatus("Mem0 API key works.");
-  } catch (error) {
-    setStatus(error.message);
-  } finally {
-    testButton.disabled = false;
-  }
-}
-
 async function testGeminiApiKey() {
   const key = apiKeyInput.value.trim();
   if (!key) {
@@ -140,6 +118,36 @@ async function testGeminiApiKey() {
     setStatus(error.message);
   } finally {
     testButton.disabled = false;
+  }
+}
+
+async function testChromaServiceConnection() {
+  const button = document.querySelector("#test-chroma");
+  button.disabled = true;
+  setStatus("Checking local ChromaDB service...");
+  try {
+    const health = await testChromaService({ onDebug: appendDebug });
+    setStatus(`ChromaDB is ready (${health.stored_titles} title(s) indexed).`);
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function saveSimilarityThreshold() {
+  const rawThreshold = similarityThresholdInput.value.trim();
+  const threshold = rawThreshold ? Number(rawThreshold) : Number.NaN;
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    setStatus("Similarity threshold must be between 0 and 1.");
+    similarityThresholdInput.value = String(DEFAULT_SIMILARITY_THRESHOLD);
+    return;
+  }
+  try {
+    await chrome.storage.local.set({ [SIMILARITY_THRESHOLD_KEY]: threshold });
+    setStatus(`Chroma cosine similarity threshold saved: ${threshold.toFixed(2)}.`);
+  } catch (error) {
+    setStatus(`Could not save similarity threshold: ${error.message}`);
   }
 }
 
@@ -209,7 +217,7 @@ async function extractAndGroup() {
       return;
     }
     await groupAndShow(result.conversations, "Extracted from page");
-    if (result.restoreError) setStatus(`Grouped conversations. Could not restore scroll position: ${result.restoreError}`);
+    if (result.restoreError) setStatus(`Added conversations. Could not restore scroll position: ${result.restoreError}`);
   } catch (error) {
     setStatus(error.message);
   } finally {
@@ -240,42 +248,69 @@ async function importCsv() {
 }
 
 async function groupAndShow(entries, source) {
-  const stored = await chrome.storage.local.get([GEMINI_KEY, MEM0_KEY]);
+  const knownUrls = new Set(conversations.map((conversation) => urlKey(conversation.url)));
+  const newEntries = entries.filter((entry) => !knownUrls.has(urlKey(entry.url)));
+  if (!newEntries.length) {
+    setStatus("No new conversations to add; every URL is already in the graph.");
+    return;
+  }
+
+  const stored = await chrome.storage.local.get([GEMINI_KEY, SIMILARITY_THRESHOLD_KEY]);
   const geminiApiKey = String(stored[GEMINI_KEY] || "").trim();
-  const mem0ApiKey = String(stored[MEM0_KEY] || "").trim();
-  if (!mem0ApiKey || !geminiApiKey) {
+  if (!geminiApiKey) {
     settings.open = true;
-    const missingService = !mem0ApiKey ? "Mem0" : "Gemini";
-    (!mem0ApiKey ? mem0ApiKeyInput : apiKeyInput).focus();
-    throw new Error(`Save a ${missingService} API key in AI grouping settings to create project groups.`);
+    apiKeyInput.focus();
+    throw new Error("Save a Gemini API key in AI grouping settings to create project groups.");
   }
 
   const grouped = await groupConversations({
-    mem0ApiKey,
     geminiApiKey,
-    conversations: entries,
+    conversations: newEntries,
+    existingProjects: projects,
+    similarityThreshold: readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]),
     onStatus: setStatus,
+    onDebug: appendDebug,
   });
-  await persistGraph(grouped, entries, source);
-  conversations = entries;
-  projects = grouped;
-  graphSource = source;
+  const appended = appendGraphData(projects, conversations, grouped, newEntries);
+  const nextSource = graphSource
+    ? [...new Set([...graphSource.split(", "), source])].filter(Boolean).join(", ")
+    : source;
+  await persistGraph(appended.projects, appended.conversations, nextSource);
+  conversations = appended.conversations;
+  projects = appended.projects;
+  graphSource = nextSource;
+  try {
+    await syncProjectAssignments(assignmentsForUrls(newEntries.map((entry) => entry.url)), {
+      onDebug: appendDebug,
+    });
+  } catch (error) {
+    appendDebug({
+      service: "ChromaDB",
+      stage: "Save graph assignments",
+      direction: "error",
+      payload: { message: error.message },
+    });
+    render();
+    setStatus(`Added conversations to the graph, but could not save their project assignments in ChromaDB: ${error.message}`);
+    return;
+  }
   render();
-  setStatus(`Created ${projects.length} project group(s) from ${conversations.length} conversations.`);
+  setStatus(`Added ${newEntries.length} conversation(s); graph now has ${projects.length} project(s) and ${conversations.length} conversation(s).`);
 }
 
 async function clearGraphs() {
   if (!conversations.length && !projects.length) return;
-  if (!confirm("Clear all saved conversations and project connections? This cannot be undone.")) return;
+  if (!confirm("Clear the graph and all locally indexed ChromaDB titles? This cannot be undone.")) return;
   try {
+    await clearChromaIndex({ onDebug: appendDebug });
     await chrome.storage.local.remove(STORAGE_KEY);
     conversations = [];
     projects = [];
     graphSource = "";
     render();
-    setStatus("Cleared all project graphs and conversation connections.");
+    setStatus("Cleared the graph and local ChromaDB title index.");
   } catch (error) {
-    setStatus(`Could not clear graphs: ${error.message}`);
+    setStatus(`Could not clear graph data: ${error.message}`);
   }
 }
 
@@ -291,6 +326,19 @@ async function editGraph(change) {
     }
     await persistGraph(updatedProjects, conversations, graphSource);
     projects = updatedProjects;
+    try {
+      const affectedIds = change.type === "rename"
+        ? [change.projectId]
+        : [change.projectId, change.targetProjectId];
+      await syncProjectAssignments(
+        assignmentsForProjectIds(affectedIds),
+        { onDebug: appendDebug },
+      );
+    } catch (error) {
+      render();
+      setStatus(`Graph edit saved, but ChromaDB project metadata could not be updated: ${error.message}`);
+      return;
+    }
     render();
     setStatus(change.type === "rename"
       ? "Project renamed."
@@ -309,6 +357,32 @@ async function persistGraph(nextProjects = projects, nextConversations = convers
       savedAt: new Date().toISOString(),
     },
   });
+}
+
+function assignmentsForUrls(urls) {
+  const selected = new Set(urls.map(urlKey));
+  return projects.flatMap((project) =>
+    (project.links || [])
+      .filter((link) => selected.has(urlKey(link.url)))
+      .map((link) => ({
+        title: link.title || link.url,
+        url: link.url,
+        project_id: project.id,
+        project_name: project.name,
+      }))
+  );
+}
+
+function assignmentsForProjectIds(projectIds) {
+  const selected = new Set(projectIds.filter(Boolean));
+  return projects
+    .filter((project) => selected.has(project.id))
+    .flatMap((project) => (project.links || []).map((link) => ({
+      title: link.title || link.url,
+      url: link.url,
+      project_id: project.id,
+      project_name: project.name,
+    })));
 }
 
 function render() {
@@ -358,4 +432,51 @@ async function runOnActiveTab(action) {
 
 function setStatus(message) {
   status.textContent = message;
+}
+
+function appendDebug(entry) {
+  const record = {
+    time: new Date().toLocaleTimeString(),
+    ...entry,
+  };
+  let text = JSON.stringify(record, null, 2);
+  for (const key of [apiKeyInput.value]) {
+    const secret = key.trim();
+    if (secret) text = text.split(secret).join("[REDACTED API KEY]");
+  }
+  if (text.length > 20000) {
+    text = `${text.slice(0, 20000)}\n... [record truncated]`;
+  }
+  debugEntries.push(text);
+  while (debugEntries.length > 200 || debugEntries.join("\n\n").length > 400000) {
+    debugEntries.shift();
+  }
+  debugOutput.textContent = debugEntries.join("\n\n");
+  debugCount.textContent = `${debugEntries.length} record(s)`;
+  debugOutput.scrollTop = debugOutput.scrollHeight;
+}
+
+function clearDebug() {
+  debugEntries = [];
+  debugOutput.textContent = "Debug output cleared.";
+  debugCount.textContent = "0 records";
+}
+
+function readSimilarityThreshold(savedValue) {
+  const value = Number(savedValue);
+  return Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : DEFAULT_SIMILARITY_THRESHOLD;
+}
+
+function urlKey(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return url;
+  }
 }

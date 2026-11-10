@@ -148,6 +148,49 @@ select:focus-visible,
   padding: 0 10px 10px;
 }
 
+.service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.service-row strong {
+  font-size: 12px;
+}
+
+.service-row button {
+  flex: none;
+}
+
+.threshold-control {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.threshold-control label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.threshold-row input {
+  width: 78px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  padding: 7px 8px;
+  font: inherit;
+}
+
 .settings label,
 .source-tools > label {
   font-size: 12px;
@@ -239,6 +282,53 @@ select {
   min-height: 20px;
   padding: 8px 2px;
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.debug-console {
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.debug-console summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.debug-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 9px 7px;
+}
+
+.debug-tools .hint {
+  min-width: 0;
+}
+
+.debug-tools button {
+  flex: none;
+}
+
+.debug-output {
+  max-height: 260px;
+  margin: 0 8px 8px;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 11px/1.4 Consolas, monospace;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

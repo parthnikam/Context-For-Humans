@@ -1,80 +1,96 @@
 import assert from "node:assert/strict";
 import {
-  clusterBySimilarity,
+  clearChromaIndex,
   groupConversations,
+  syncProjectAssignments,
+  testChromaService,
   testGeminiKey,
-  testMem0Key,
 } from "./grouping.js";
 
-assert.deepEqual(
-  clusterBySimilarity(5, [
-    [
-      { sourceIndex: 0, targetIndex: 1, score: 0.8 },
-      { sourceIndex: 1, targetIndex: 2, score: 0.7 },
-    ],
-    [{ sourceIndex: 3, targetIndex: 4, score: 0.9 }],
-    [],
-  ]),
-  [[0, 1, 2], [3, 4]],
-);
-
-const conversations = [
-  { title: "React project overview", url: "https://example.test/1" },
-  { title: "React component design", url: "https://example.test/2" },
-  { title: "Italian pasta recipe", url: "https://example.test/3" },
-];
-const indexed = [];
 const calls = [];
+const debugRecords = [];
+const incoming = [
+  { title: "React hooks guide", url: "https://provider-a.test/1" },
+  { title: "React hooks examples", url: "https://provider-b.test/2" },
+  { title: "Weekend soup recipe", url: "https://provider-c.test/3" },
+];
+const existingProjects = [{
+  id: "project-react",
+  name: "React project",
+  intent: "Build and learn React interfaces.",
+  links: [
+    { title: "React state patterns", url: "https://provider-old.test/1" },
+    { title: "React component guide", url: "https://provider-old.test/2" },
+  ],
+}];
+
 const fakeFetch = async (url, init = {}) => {
   const parsedUrl = new URL(url);
-  calls.push({ url: parsedUrl, init });
-  if (parsedUrl.pathname === "/v1/ping/") return new Response("{}", { status: 200 });
-
   const body = init.body ? JSON.parse(init.body) : {};
-  if (parsedUrl.pathname === "/v3/memories/add/") {
-    indexed.push({
-      title: body.messages[0].content,
-      runId: body.run_id,
-      userId: body.user_id,
-      metadata: body.metadata,
-      infer: body.infer,
-    });
-    return jsonResponse({ event_id: `event-${indexed.length}`, status: "SUCCEEDED" });
+  calls.push({ url: parsedUrl, init, body });
+
+  if (parsedUrl.pathname === "/health") {
+    return jsonResponse({ ok: true, stored_titles: 25 });
   }
-  if (parsedUrl.pathname === "/v3/memories/search/") {
-    const source = indexed.find((record) => record.title === body.query);
-    const sourceIndex = source.metadata.conversation_index;
-    const results = indexed
-      .filter((record) => record.runId === body.filters.run_id && record.userId === body.filters.user_id)
-      .map((record) => ({
-        memory: record.title,
-        metadata: record.metadata,
-        score: (
-          sourceIndex === record.metadata.conversation_index ||
-          [sourceIndex, record.metadata.conversation_index].sort().join(",") === "0,1"
-        ) ? 0.92 : 0.18,
-      }))
-      .filter((result) => result.score >= body.threshold);
-    return jsonResponse({ results });
+  if (parsedUrl.pathname === "/cluster") {
+    return jsonResponse({
+      indexed_titles: incoming.length,
+      stored_titles: 28,
+      similarity_threshold: body.similarity_threshold,
+      clusters: [
+        {
+          cluster_id: "cluster-0",
+          conversations: incoming.slice(0, 2),
+          existing_project_candidates: [{
+            project_id: "project-react",
+            name: "React project",
+            similarity: 0.81,
+            matched_title: "React state patterns",
+          }],
+        },
+        {
+          cluster_id: "cluster-1",
+          conversations: incoming.slice(2),
+          existing_project_candidates: [],
+        },
+      ],
+    });
+  }
+  if (parsedUrl.pathname === "/assign") {
+    return jsonResponse({ updated: body.assignments.length });
+  }
+  if (parsedUrl.pathname === "/clear") {
+    return jsonResponse({ cleared: true });
   }
   if (parsedUrl.pathname.includes(":generateContent")) {
     const prompt = body.contents[0].parts[0].text;
-    if (!prompt.includes("Clusters (id and representative conversation titles):")) {
-      return jsonResponse({
-        candidates: [{ content: { parts: [{ text: "ok" }] } }],
-      });
+    if (!prompt.includes("Incoming fixed clusters and ChromaDB matches:")) {
+      return jsonResponse({ candidates: [{ content: { parts: [{ text: "ok" }] } }] });
     }
-    const clusters = JSON.parse(prompt.split("Clusters (id and representative conversation titles):\n")[1]);
+    assert.match(prompt, /React project/);
+    assert.match(prompt, /React state patterns/);
+    assert.match(prompt, /project-react/);
+    assert.match(prompt, /Weekend soup recipe/);
+    assert.doesNotMatch(prompt, /provider-a\.test/);
     return jsonResponse({
       candidates: [{
         content: {
           parts: [{
             text: JSON.stringify({
-              groups: clusters.map((cluster) => ({
-                id: cluster.id,
-                name: `Project ${cluster.id + 1}`,
-                intent: cluster.titles[0],
-              })),
+              assignments: [
+                {
+                  cluster_id: "incorrect-id",
+                  existing_project_id: "project-react",
+                  project_name: "",
+                  intent: "",
+                },
+                {
+                  cluster_id: "incorrect-id",
+                  existing_project_id: "",
+                  project_name: "Cooking",
+                  intent: "Collect cooking and recipe conversations.",
+                },
+              ],
             }),
           }],
         },
@@ -84,46 +100,46 @@ const fakeFetch = async (url, init = {}) => {
   throw new Error(`Unexpected request: ${url}`);
 };
 
-assert.deepEqual(await testMem0Key("mem0-test-key", { fetch: fakeFetch }), { ok: true });
+assert.equal((await testChromaService({ fetch: fakeFetch })).stored_titles, 25);
 assert.deepEqual(await testGeminiKey("gemini-test-key", { fetch: fakeFetch }), { ok: true });
 
 const projects = await groupConversations({
-  mem0ApiKey: "mem0-test-key",
   geminiApiKey: "gemini-test-key",
-  conversations,
+  conversations: incoming,
+  existingProjects,
+  similarityThreshold: 0.67,
   fetch: fakeFetch,
   onStatus: () => {},
+  onDebug: (entry) => debugRecords.push(entry),
 });
 
-assert.equal(indexed.length, conversations.length);
-assert.ok(indexed.every((record) => record.infer === false));
-assert.ok(indexed.every((record) => record.runId === indexed[0].runId));
-assert.ok(indexed.every((record) => record.userId === "conversation-exporter"));
+assert.deepEqual(projects.map((project) => project.id), ["project-react", "new:cluster-1"]);
+assert.deepEqual(projects.map((project) => project.name), ["React project", "Cooking"]);
 assert.deepEqual(projects.map((project) => project.links.map((link) => link.title)), [
-  ["React project overview", "React component design"],
-  ["Italian pasta recipe"],
+  ["React hooks guide", "React hooks examples"],
+  ["Weekend soup recipe"],
 ]);
-assert.deepEqual(projects.map((project) => project.name), [
-  "Project 1",
-  "Italian pasta recipe",
-]);
+const clusterRequest = calls.find((call) => call.url.pathname === "/cluster");
+assert.equal(clusterRequest.body.similarity_threshold, 0.67);
+const assignmentRequest = calls
+  .filter((call) => call.url.pathname.includes(":generateContent"))
+  .map((call) => JSON.parse(call.init.body).contents[0].parts[0].text)
+  .find((prompt) => prompt.includes("Incoming fixed clusters and ChromaDB matches:"));
+assert.match(assignmentRequest, /Existing projects and representative titles/);
+assert.ok(debugRecords.some((entry) => entry.service === "ChromaDB" && entry.direction === "response"));
+assert.ok(debugRecords.some((entry) => entry.service === "Gemini" && entry.direction === "request"));
+assert.doesNotMatch(JSON.stringify(debugRecords), /gemini-test-key|x-goog-api-key/);
 
-const searchRequests = calls.filter((call) => call.url.pathname === "/v3/memories/search/");
-assert.equal(searchRequests.length, conversations.length);
-assert.ok(searchRequests.every((call) => call.init.body));
-assert.ok(searchRequests.every((call) => JSON.parse(call.init.body).threshold === 0.6));
-const gemmaRequest = calls.find((call) =>
-  call.url.pathname.includes(":generateContent") &&
-  JSON.parse(call.init.body).contents[0].parts[0].text.includes(
-    "Clusters (id and representative conversation titles):",
-  )
-);
-const gemmaPrompt = JSON.parse(gemmaRequest.init.body).contents[0].parts[0].text;
-assert.match(gemmaPrompt, /React project overview/);
-assert.doesNotMatch(gemmaPrompt, /Italian pasta recipe/);
-assert.doesNotMatch(gemmaPrompt, /https:\/\/example\.test/);
+assert.deepEqual(await syncProjectAssignments([{
+  title: "React hooks guide",
+  url: incoming[0].url,
+  project_id: "project-react",
+  project_name: "React project",
+}], { fetch: fakeFetch }), { updated: 1 });
+assert.deepEqual(await clearChromaIndex({ fetch: fakeFetch }), { cleared: true });
+assert.equal(calls.find((call) => call.url.pathname === "/assign").body.assignments.length, 1);
 
-console.log("Mem0 similarity grouping and Gemma naming checks passed.");
+console.log("Persistent Chroma clustering and Gemma assignment checks passed.");
 
 function jsonResponse(data) {
   return new Response(JSON.stringify(data), {
