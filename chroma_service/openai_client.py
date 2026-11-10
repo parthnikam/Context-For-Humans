@@ -1,4 +1,4 @@
-"""OpenAI client: names clusters and reuses projects within a category."""
+"""OpenAI client: names clusters, reuses projects, and clusters open tabs."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from chroma_service.config import (
     OPENAI_MODEL,
     load_openai_api_key,
 )
+from chroma_service.models import TabClusterRequest
 from chroma_service.models import ProjectAssignmentRequest
 
 OPENAI_ASSIGNMENT_SCHEMA = {
@@ -258,3 +259,141 @@ def openai_http_error(response: requests.Response, api_key: str) -> HTTPExceptio
     if detail:
         message = f"{message} {detail}"
     return HTTPException(status_code=502, detail=message)
+
+
+TAB_CLUSTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "trails": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "one_liner": {"type": "string"},
+                    "tab_ids": {"type": "array", "items": {"type": "integer"}},
+                },
+                "required": ["label", "one_liner", "tab_ids"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["trails"],
+    "additionalProperties": False,
+}
+
+
+def build_tab_cluster_prompt(request: TabClusterRequest) -> str:
+    payload = [
+        {"id": tab.id, "title": tab.title, "url": tab.url}
+        for tab in request.tabs
+    ]
+    known = [
+        {"name": project.name, "intent": project.intent}
+        for project in request.projects
+        if project.name
+    ]
+    rules = [
+        "- Group by task, not by website. Two GitHub tabs can be different projects. A docs tab and a forum tab can be the same project.",
+        "- Put every tab id in exactly one trail.",
+        "- label is a short project name.",
+        "- one_liner is one sentence the person can read to remember what that pile of tabs is for.",
+    ]
+    if known:
+        rules.append("- If the tabs belong to an existing project, label must be that project's name exactly.")
+        rules.append("- Invent a new label only when none of the existing projects fit.")
+    lines = [
+        "Group these open browser tabs into the projects the person is working on.",
+        "",
+        "Rules:",
+        *rules,
+        "",
+        "Tabs:",
+        json.dumps(payload, ensure_ascii=False),
+    ]
+    if known:
+        lines.extend(["", "Existing projects:", json.dumps(known, ensure_ascii=False)])
+    return "\n".join(lines)
+
+
+def normalize_trails(raw_trails: Any, request: TabClusterRequest) -> list[dict[str, Any]]:
+    known = {tab.id for tab in request.tabs}
+    used: set[int] = set()
+    trails: list[dict[str, Any]] = []
+    for raw in raw_trails if isinstance(raw_trails, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        tab_ids: list[int] = []
+        for value in raw.get("tab_ids") or []:
+            try:
+                numeric = int(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric not in known or numeric in used:
+                continue
+            used.add(numeric)
+            tab_ids.append(numeric)
+        if not tab_ids:
+            continue
+        trails.append({
+            "label": str(raw.get("label") or "").strip() or "Untitled",
+            "one_liner": str(raw.get("one_liner") or "").strip(),
+            "tab_ids": tab_ids,
+        })
+    missing = [tab.id for tab in request.tabs if tab.id not in used]
+    if missing:
+        trails.append({
+            "label": "Ungrouped",
+            "one_liner": "These tabs did not fit another group.",
+            "tab_ids": missing,
+        })
+    return trails
+
+
+def cluster_tabs(request: TabClusterRequest) -> dict[str, Any]:
+    api_key = load_openai_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY was not found in the service environment or chrome_agent/.env.",
+        )
+    try:
+        response = requests.post(
+            OPENAI_CHAT_COMPLETIONS_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": OPENAI_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You organize open browser tabs into the projects they belong to."},
+                    {"role": "user", "content": build_tab_cluster_prompt(request)},
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "tab_trails",
+                        "strict": True,
+                        "schema": TAB_CLUSTER_SCHEMA,
+                    },
+                },
+                "reasoning_effort": "none",
+                "max_completion_tokens": 4096,
+            },
+            timeout=90,
+        )
+    except requests.RequestException as error:
+        raise HTTPException(status_code=502, detail="Could not reach the OpenAI tab clustering API.") from error
+    if not response.ok:
+        raise openai_http_error(response, api_key)
+    try:
+        result = response.json()
+        content = chat_completion_text(result)
+        parsed = json.loads(content) if content else {}
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=502, detail="OpenAI returned invalid tab clusters.") from error
+    trails = parsed.get("trails") if isinstance(parsed, dict) else None
+    if not isinstance(trails, list):
+        raise HTTPException(status_code=502, detail="OpenAI returned invalid tab clusters.")
+    return {
+        "model": OPENAI_MODEL,
+        "trails": normalize_trails(trails, request),
+    }

@@ -43,3 +43,19 @@ class SearchRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     user_id: str = Field(default="local-user", min_length=1, max_length=200)
+
+
+class TabClusterTab(BaseModel):
+    id: int
+    title: str = Field(min_length=1, max_length=1000)
+    url: str = Field(min_length=1, max_length=4096)
+
+
+class TabClusterProject(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    intent: str = Field(default="", max_length=2000)
+
+
+class TabClusterRequest(BaseModel):
+    tabs: list[TabClusterTab] = Field(min_length=1, max_length=200)
+    projects: list[TabClusterProject] = Field(default_factory=list, max_length=1000)

@@ -3,6 +3,7 @@ import { extractConversations } from "../lib/extraction.js";
 import {
   askQuestion,
   clearChromaIndex,
+  clusterOpenTabs,
   DEFAULT_SIMILARITY_THRESHOLD,
   groupConversations,
   listCategories,
@@ -16,12 +17,30 @@ import {
 import { openGraphNode } from "../lib/graph-actions.js";
 import { renderGraph } from "../lib/graph-view.js";
 import { appendGraphData, moveConversation } from "../lib/graph-state.js";
+import { mountGraph } from "../lib/graph-force.js";
+import { fillGraphDetail } from "../lib/graph-detail.js";
+import { tabGraphModel } from "../lib/tab-graph-model.js";
+import { providerLogo } from "../lib/provider-logos.js";
+import {
+  applyChromeGroups,
+  focusProjectGroup,
+  focusTab,
+  isUntitledTitle,
+  listChromeGroups,
+  mergeTrailGroups,
+  openProjectTabs,
+  projectGroups,
+  pullUntitled,
+  shouldSkipUrl,
+  ungroupProjectTabs,
+} from "../lib/tab-groups.js";
 import { runPageAction } from "../lib/page-actions.js";
 import { createCsvDownload } from "../lib/csv-download.js";
 
 const STORAGE_KEY = "conversationProjectGraph";
 const LEGACY_MEM0_KEY = "conversationMem0ApiKey";
 const SIMILARITY_THRESHOLD_KEY = "chromaSimilarityThreshold";
+const SUGGESTIONS_KEY = "tabClusterSuggestions";
 
 const scanButton = document.querySelector("#detect-areas");
 const areaSelect = document.querySelector("#area-select");
@@ -35,25 +54,47 @@ const graph = document.querySelector("#graph");
 const detail = document.querySelector("#project-detail");
 const similarityThresholdInput = document.querySelector("#similarity-threshold");
 const downloadButton = document.querySelector("#download");
-const viewLargerLink = document.querySelector("#view-larger");
 const debugOutput = document.querySelector("#debug-output");
 const debugCount = document.querySelector("#debug-count");
-const askLog = document.querySelector("#ask-log");
+const askAnswer = document.querySelector("#ask-answer");
 const askForm = document.querySelector("#ask-form");
 const askInput = document.querySelector("#ask-input");
-const graphTabButton = document.querySelector("#tab-graph");
-const importTabButton = document.querySelector("#tab-import");
-const graphTabView = document.querySelector("#view-graph");
-const importTabView = document.querySelector("#view-import");
+const largerTabButton = document.querySelector("#tab-larger");
+const projectsTop = document.querySelector("#projects-top");
+const projectsList = document.querySelector("#projects-list");
+const projectsGraphStage = document.querySelector("#projects-graph-stage");
+const projectsGraphDetail = document.querySelector("#projects-graph-detail");
+const projectsFind = document.querySelector("#projects-find");
+const projectsListToggle = document.querySelector("#projects-list-toggle");
+const projectsGraphToggle = document.querySelector("#projects-graph-toggle");
+const chromeGroupsBody = document.querySelector("#chrome-groups-body");
+
+const PANEL_TABS = ["conversations", "projects", "import"];
+const panelTabButtons = {
+  conversations: document.querySelector("#tab-conversations"),
+  projects: document.querySelector("#tab-projects"),
+  import: document.querySelector("#tab-import"),
+};
+const panelTabViews = {
+  conversations: document.querySelector("#view-conversations"),
+  projects: document.querySelector("#view-projects"),
+  import: document.querySelector("#view-import"),
+};
 
 let areas = [];
 let projects = [];
 let conversations = [];
+let suggestions = [];
+let chromeGroups = null;
 let graphSource = "";
 let debugEntries = [];
 let cancelled = false;
 let busy = false;
 let migrationPromise = Promise.resolve();
+let activeTab = "conversations";
+let tabGraphHandle = null;
+let projectsViewMode = "list";
+let deleteConfirmingId = null;
 
 scanButton.addEventListener("click", detectAreas);
 areaSelect.addEventListener("change", selectArea);
@@ -72,23 +113,85 @@ askForm.addEventListener("submit", handleAsk);
 document.querySelector("#clear-graphs").addEventListener("click", clearGraphs);
 document.querySelector("#clear-debug").addEventListener("click", clearDebug);
 similarityThresholdInput.addEventListener("change", saveSimilarityThreshold);
-graphTabButton.addEventListener("click", () => selectPanelTab("graph"));
-importTabButton.addEventListener("click", () => selectPanelTab("import"));
+for (const [name, button] of Object.entries(panelTabButtons)) {
+  button.addEventListener("click", () => selectPanelTab(name));
+}
+largerTabButton.addEventListener("click", () => {
+  chrome.tabs
+    .create({ url: chrome.runtime.getURL("pages/sidepanel.html?view=large") })
+    .catch((error) => setStatus(error.message));
+});
+if (new URLSearchParams(location.search).get("view") === "large") {
+  document.body.classList.add("panel-large");
+}
+projectsListToggle.addEventListener("click", () => setProjectsViewMode("list"));
+projectsGraphToggle.addEventListener("click", () => setProjectsViewMode("graph"));
+
+let projectsSemanticMatches = new Set();
+let projectsSearchTimer = 0;
+let projectsSearchSequence = 0;
+
+projectsFind.addEventListener("input", () => {
+  projectsSemanticMatches = new Set();
+  if (projectsViewMode === "list") {
+    renderProjectsBrowser();
+  } else {
+    tabGraphHandle?.redraw();
+  }
+  window.clearTimeout(projectsSearchTimer);
+  const sequence = ++projectsSearchSequence;
+  const query = projectsFind.value.trim();
+  if (query.length < 2) return;
+  projectsSearchTimer = window.setTimeout(async () => {
+    try {
+      const result = await searchTitles(query, { onDebug: appendDebug });
+      if (sequence !== projectsSearchSequence) return;
+      projectsSemanticMatches = new Set((Array.isArray(result.matches) ? result.matches : [])
+        .map((item) => urlKey(item.url))
+        .filter(Boolean));
+    } catch {
+      if (sequence !== projectsSearchSequence) return;
+      projectsSemanticMatches = new Set();
+      setStatus(`Similarity search unavailable: ${query}`);
+    }
+    if (sequence !== projectsSearchSequence) return;
+    if (projectsViewMode === "list") {
+      renderProjectsBrowser();
+    } else {
+      tabGraphHandle?.redraw();
+    }
+  }, 300);
+});
 
 function selectPanelTab(name) {
-  const isGraph = name === "graph";
-  graphTabButton.setAttribute("aria-selected", String(isGraph));
-  importTabButton.setAttribute("aria-selected", String(!isGraph));
-  graphTabView.hidden = !isGraph;
-  importTabView.hidden = isGraph;
+  if (!PANEL_TABS.includes(name)) name = "conversations";
+  activeTab = name;
+  for (const [tab, button] of Object.entries(panelTabButtons)) {
+    button.setAttribute("aria-selected", String(tab === name));
+  }
+  for (const [tab, view] of Object.entries(panelTabViews)) {
+    view.hidden = tab !== name;
+  }
+  if (name === "projects") {
+    renderProjectsView();
+  } else {
+    destroyTabGraph();
+    deleteConfirmingId = null;
+  }
+}
+
+function setProjectsViewMode(mode) {
+  projectsViewMode = mode === "graph" ? "graph" : "list";
+  if (activeTab === "projects") renderProjectsView();
 }
 
 initialize();
 
 async function initialize() {
   try {
-    const stored = await chrome.storage.local.get([STORAGE_KEY, SIMILARITY_THRESHOLD_KEY]);
+    const stored = await chrome.storage.local.get([STORAGE_KEY, SIMILARITY_THRESHOLD_KEY, SUGGESTIONS_KEY]);
     await chrome.storage.local.remove([LEGACY_MEM0_KEY, "conversationGeminiApiKey"]);
+    suggestions = Array.isArray(stored[SUGGESTIONS_KEY]) ? stored[SUGGESTIONS_KEY] : [];
     similarityThresholdInput.value = String(readSimilarityThreshold(stored[SIMILARITY_THRESHOLD_KEY]));
     const saved = stored[STORAGE_KEY];
     if (saved && Array.isArray(saved.projects) && Array.isArray(saved.conversations)) {
@@ -120,6 +223,7 @@ async function initialize() {
   } catch (error) {
     setStatus(`Could not load saved data: ${error.message}`);
   }
+  await loadChromeGroups();
 }
 
 async function migrateLegacyGraph(savedThreshold, validCategoryIds) {
@@ -205,18 +309,18 @@ async function handleAsk(event) {
   event.preventDefault();
   const question = askInput.value.trim();
   if (!question) return;
-  appendAskMessage("you", question);
   askInput.value = "";
   const sendButton = askForm.querySelector("button");
   sendButton.disabled = true;
   askInput.disabled = true;
+  showAskAnswer("Thinking…", []);
   setStatus("Asking about your projects...");
   try {
     const result = await askQuestion(question, { onDebug: appendDebug });
-    appendAskMessage("assistant", result.answer);
+    showAskAnswer(result.answer, result.sources);
     setStatus("Answered.");
   } catch (error) {
-    appendAskMessage("assistant", `Could not answer: ${error.message}`);
+    showAskAnswer(`Could not answer: ${error.message}`, []);
     setStatus(error.message);
   } finally {
     sendButton.disabled = false;
@@ -225,14 +329,25 @@ async function handleAsk(event) {
   }
 }
 
-function appendAskMessage(role, text) {
-  const empty = askLog.querySelector(".ask-empty");
-  if (empty) empty.remove();
-  const line = document.createElement("p");
-  line.className = `ask-message ${role}`;
-  line.textContent = text;
-  askLog.append(line);
-  askLog.scrollTop = askLog.scrollHeight;
+function showAskAnswer(text, sources = []) {
+  askAnswer.replaceChildren();
+  askAnswer.hidden = false;
+  askAnswer.append(document.createTextNode(text));
+  if (Array.isArray(sources) && sources.length) {
+    const sourceList = document.createElement("span");
+    sourceList.className = "ask-sources";
+    for (const [index, source] of sources.entries()) {
+      const link = document.createElement("a");
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = source.title || source.url;
+      link.title = source.url;
+      sourceList.append(link);
+      if (index < sources.length - 1) sourceList.append(" · ");
+    }
+    askAnswer.append(sourceList);
+  }
 }
 
 async function saveSimilarityThreshold() {
@@ -347,7 +462,7 @@ async function importCsv() {
   }
 }
 
-async function groupAndShow(entries, source) {
+async function groupAndShow(entries, source, { stay = false, origin = "conversations" } = {}) {
   await migrationPromise;
   const knownUrls = new Set(conversations.map((conversation) => urlKey(conversation.url)));
   const newEntries = entries.filter((entry) => !knownUrls.has(urlKey(entry.url)));
@@ -357,6 +472,7 @@ async function groupAndShow(entries, source) {
   }
 
   const stored = await chrome.storage.local.get([SIMILARITY_THRESHOLD_KEY]);
+  const previousIds = new Set(projects.map((project) => project.id));
 
   const grouped = await groupConversations({
     conversations: newEntries,
@@ -366,12 +482,15 @@ async function groupAndShow(entries, source) {
     onDebug: appendDebug,
   });
   const appended = appendGraphData(projects, conversations, grouped, newEntries);
+  const taggedProjects = appended.projects.map((project) => (
+    previousIds.has(project.id) || project.origin ? project : { ...project, origin }
+  ));
   const nextSource = graphSource
     ? [...new Set([...graphSource.split(", "), source])].filter(Boolean).join(", ")
     : source;
-  await persistGraph(appended.projects, appended.conversations, nextSource);
+  await persistGraph(taggedProjects, appended.conversations, nextSource);
   conversations = appended.conversations;
-  projects = appended.projects;
+  projects = taggedProjects;
   graphSource = nextSource;
   try {
     await syncProjectAssignments(assignmentsForUrls(newEntries.map((entry) => entry.url)), {
@@ -389,8 +508,12 @@ async function groupAndShow(entries, source) {
     return;
   }
   render();
-  selectPanelTab("graph");
+  if (!stay) selectPanelTab("conversations");
   setStatus(`Added ${newEntries.length} conversation(s); graph now has ${projects.length} project(s) and ${conversations.length} conversation(s).`);
+}
+
+function tabProjects() {
+  return projects.filter((project) => project.origin === "tabs");
 }
 
 async function clearGraphs() {
@@ -497,9 +620,571 @@ function render() {
     : "No data";
   downloadButton.disabled = conversations.length === 0;
   document.querySelector("#clear-graphs").disabled = busy;
-  const hasGraph = conversations.length > 0;
-  viewLargerLink.setAttribute("aria-disabled", String(!hasGraph));
-  viewLargerLink.tabIndex = hasGraph ? 0 : -1;
+  if (activeTab === "projects") renderProjectsView();
+}
+
+async function loadChromeGroups() {
+  try {
+    chromeGroups = await listChromeGroups();
+  } catch {
+    chromeGroups = null;
+  }
+}
+
+async function saveSuggestions() {
+  try {
+    await chrome.storage.local.set({ [SUGGESTIONS_KEY]: suggestions });
+  } catch {
+    // Suggestions are a convenience; keep going if storage fails.
+  }
+}
+
+async function groupMyTabs(button) {
+  if (busy) return;
+  if (!chrome.tabGroups || !chrome.tabGroups.query) {
+    setStatus("Tab grouping needs the new permissions. Reload the extension in chrome://extensions, then close and reopen this panel.");
+    return;
+  }
+  busy = true;
+  button.disabled = true;
+  setStatus("Grouping tabs…");
+  try {
+    const open = await chrome.tabs.query({});
+    const tabs = open.filter((tab) => tab.id != null && !tab.pinned && !shouldSkipUrl(tab.url));
+    if (!tabs.length) {
+      setStatus("No groupable tabs are open. Pinned and browser-internal tabs are skipped.");
+      return;
+    }
+    let groups = pullUntitled(projectGroups(projects, tabs), tabs);
+    const claimed = new Set(groups.flatMap((group) => group.tabIds));
+    const loose = tabs.filter((tab) => !claimed.has(tab.id) && !isUntitledTitle(tab.title));
+    let warning = "";
+    let trails = [];
+    if (loose.length) {
+      try {
+        const result = await clusterOpenTabs(
+          loose.map((tab) => ({ id: tab.id, title: tab.title || tab.url || "Untitled", url: tab.url })),
+          projects.map((project) => ({ name: project.name, intent: project.intent || "" })),
+          { onDebug: appendDebug },
+        );
+        trails = result.trails || [];
+        groups = mergeTrailGroups(groups, trails);
+      } catch (error) {
+        appendDebug({
+          service: "OpenAI",
+          stage: "Cluster open tabs",
+          direction: "error",
+          payload: { message: error.message },
+        });
+        warning = `Could not cluster ${loose.length} loose tab(s): ${error.message}`;
+        if (!groups.length) {
+          throw new Error(`${warning} Is the local ChromaDB service running the latest code? Restart it (python -m uvicorn chroma_service.app:app --host 127.0.0.1 --port 8765).`);
+        }
+      }
+    }
+    if (!groups.length) {
+      setStatus(warning || "No open tabs could be grouped.");
+      return;
+    }
+    const applied = await applyChromeGroups(groups);
+    const names = groups.map((group) => group.title).join(", ");
+    let filedNote = "";
+    if (trails.length) {
+      try {
+        const filed = await autoAcceptTrails(trails, loose);
+        if (filed > 0) filedNote = ` Filed ${filed} group(s) into your projects.`;
+        suggestions = [];
+      } catch (error) {
+        suggestions = suggestionsFromTrails(trails, loose);
+        filedNote = ` Could not file them automatically: ${error.message}. Accept the suggestions below.`;
+      }
+      await saveSuggestions();
+    }
+    const parts = [`Grouped ${names} in Chrome.`, filedNote, applied.warning, warning].filter(Boolean);
+    setStatus(parts.join(" "));
+  } catch (error) {
+    setStatus(`Could not group tabs: ${error.message}`);
+  } finally {
+    busy = false;
+    button.disabled = false;
+    await loadChromeGroups();
+    if (activeTab === "projects") renderProjectsView();
+  }
+}
+
+function suggestionsFromTrails(trails, loose) {
+  const tabById = new Map((loose || []).map((tab) => [tab.id, tab]));
+  return (trails || [])
+    .filter((trail) => (trail.label || "").toLowerCase() !== "ungrouped" && (trail.tab_ids || []).length)
+    .map((trail, index) => ({
+      id: `suggestion-${index}-${trail.label}`,
+      label: trail.label,
+      one_liner: trail.one_liner,
+      tabs: (trail.tab_ids || [])
+        .map((id) => tabById.get(id))
+        .filter(Boolean)
+        .map((tab) => ({
+          id: tab.id,
+          title: tab.title || tab.url || "Untitled",
+          url: tab.url,
+          favIconUrl: "",
+        })),
+    }))
+    .filter((suggestion) => suggestion.tabs.length);
+}
+
+async function autoAcceptTrails(trails, loose) {
+  const tabById = new Map((loose || []).map((tab) => [tab.id, tab]));
+  const filing = (trails || [])
+    .filter((trail) => (trail.label || "").toLowerCase() !== "ungrouped" && (trail.tab_ids || []).length)
+    .map((trail) => ({
+      trail,
+      entries: (trail.tab_ids || [])
+        .map((id) => tabById.get(id))
+        .filter(Boolean)
+        .map((tab) => ({ title: tab.title || tab.url || "Untitled", url: tab.url })),
+    }))
+    .filter((item) => item.entries.length);
+  if (!filing.length) return 0;
+
+  const knownBefore = new Set(conversations.map((conversation) => urlKey(conversation.url)));
+  const fresh = filing.filter((item) => item.entries.some((entry) => !knownBefore.has(urlKey(entry.url))));
+  if (fresh.length) {
+    const allEntries = [];
+    const seen = new Set();
+    for (const item of fresh) {
+      for (const entry of item.entries) {
+        const key = urlKey(entry.url);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        allEntries.push(entry);
+      }
+    }
+    const labels = filing.map((item) => item.trail.label).join(", ");
+    await groupAndShow(allEntries, `Tabs: ${labels}`, { stay: true, origin: "tabs" });
+  }
+
+  const claimedProjectIds = new Set();
+  const updates = [];
+  let marked = 0;
+  for (const item of filing) {
+    const targetUrls = new Set(item.entries.map((entry) => urlKey(entry.url)));
+    const hosts = projects
+      .map((project) => ({
+        project,
+        count: (project.links || []).filter((link) => targetUrls.has(urlKey(link.url))).length,
+      }))
+      .filter((host) => host.count > 0 && !claimedProjectIds.has(host.project.id))
+      .sort((left, right) => right.count - left.count);
+    const host = hosts[0];
+    if (!host) continue;
+    claimedProjectIds.add(host.project.id);
+    marked += 1;
+    const wantsRename = fresh.includes(item)
+      && host.project.name !== item.trail.label
+      && !projects.some((project) => project.name === item.trail.label);
+    if (host.project.origin === "tabs" && !wantsRename) continue;
+    updates.push({
+      projectId: host.project.id,
+      label: wantsRename ? item.trail.label : host.project.name,
+      intent: host.project.intent || (wantsRename ? item.trail.one_liner || "" : ""),
+    });
+  }
+  if (updates.length) {
+    const updateById = new Map(updates.map((update) => [update.projectId, update]));
+    const updated = projects.map((project) => {
+      const update = updateById.get(project.id);
+      return update
+        ? { ...project, name: update.label, intent: update.intent, origin: "tabs" }
+        : project;
+    });
+    await persistGraph(updated, conversations, graphSource);
+    projects = updated;
+    render();
+    try {
+      await syncProjectAssignments(
+        assignmentsForProjectIds([...updateById.keys()]),
+        { onDebug: appendDebug },
+      );
+    } catch (error) {
+      appendDebug({
+        service: "ChromaDB",
+        stage: "Save auto-filed projects",
+        direction: "error",
+        payload: { message: error.message },
+      });
+    }
+  }
+  return marked;
+}
+
+async function acceptSuggestion(suggestion) {
+  if (busy) return;
+  setStatus(`Filing "${suggestion.label}"…`);
+  const entries = suggestion.tabs.map((tab) => ({ title: tab.title, url: tab.url }));
+  const targetUrls = new Set(entries.map((entry) => urlKey(entry.url)));
+  try {
+    await groupAndShow(entries, `Tabs: ${suggestion.label}`, { origin: "tabs" });
+    const hosts = projects
+      .map((project) => ({
+        project,
+        count: (project.links || []).filter((link) => targetUrls.has(urlKey(link.url))).length,
+      }))
+      .filter((host) => host.count > 0)
+      .sort((left, right) => right.count - left.count);
+    const host = hosts[0];
+    if (host && host.project.name !== suggestion.label && !projects.some((project) => project.name === suggestion.label)) {
+      const updated = projects.map((project) => project.id === host.project.id
+        ? { ...project, name: suggestion.label, intent: project.intent || suggestion.one_liner, origin: "tabs" }
+        : project);
+      await persistGraph(updated, conversations, graphSource);
+      projects = updated;
+      render();
+      try {
+        await syncProjectAssignments(assignmentsForProjectIds([host.project.id]), { onDebug: appendDebug });
+      } catch (error) {
+        setStatus(`Filed under "${suggestion.label}", but could not update ChromaDB metadata: ${error.message}`);
+      }
+    }
+    suggestions = suggestions.filter((item) => item.id !== suggestion.id);
+    await saveSuggestions();
+    setStatus(`Filed "${suggestion.label}".`);
+  } catch (error) {
+    setStatus(`Could not file "${suggestion.label}": ${error.message}`);
+  } finally {
+    selectPanelTab("projects");
+  }
+}
+
+function renderProjectsView() {
+  renderProjectsTop();
+  renderProjectsBrowser();
+  renderChromeGroupsSection();
+}
+
+function renderProjectsTop() {
+  projectsTop.replaceChildren();
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const groupButton = document.createElement("button");
+  groupButton.type = "button";
+  groupButton.className = "primary";
+  groupButton.textContent = "Group my tabs";
+  groupButton.addEventListener("click", () => groupMyTabs(groupButton));
+  actions.append(groupButton);
+  projectsTop.append(actions);
+
+  projectsTop.append(sectionLabel("Suggestions"));
+  if (!suggestions.length) {
+    projectsTop.append(emptyLine("Groups from Group my tabs are filed into your projects automatically."));
+  }
+  for (const suggestion of suggestions) {
+    projectsTop.append(renderSuggestionCard(suggestion));
+  }
+}
+
+function renderProjectsBrowser() {
+  const isList = projectsViewMode === "list";
+  const filed = tabProjects();
+  projectsListToggle.setAttribute("aria-pressed", String(isList));
+  projectsGraphToggle.setAttribute("aria-pressed", String(!isList));
+  projectsGraphDetail.hidden = true;
+  projectsGraphDetail.replaceChildren();
+  if (isList) {
+    destroyTabGraph();
+    projectsGraphStage.hidden = true;
+    projectsList.hidden = false;
+    projectsList.replaceChildren();
+    const query = projectsFind.value.trim().toLowerCase();
+    const semanticActive = projectsSemanticMatches.size > 0;
+    const visible = query || semanticActive
+      ? filed.filter((project) =>
+          (query && (
+            (project.name || "").toLowerCase().includes(query)
+            || (project.intent || "").toLowerCase().includes(query)
+            || (project.links || []).some((link) => (link.title || "").toLowerCase().includes(query))
+          ))
+          || (semanticActive
+            && (project.links || []).some((link) => projectsSemanticMatches.has(urlKey(link.url)))))
+      : filed;
+    if (!visible.length) {
+      projectsList.append(emptyLine(query
+        ? "No filed projects match that search."
+        : "Nothing filed from tabs yet. Press Group my tabs to file your open tabs."));
+    }
+    for (const project of visible) {
+      projectsList.append(renderProjectCard(project, { semantic: semanticActive }));
+    }
+    return;
+  }
+  projectsList.hidden = true;
+  projectsList.replaceChildren();
+  const nodeCount = filed.length + suggestions.length;
+  if (!nodeCount) {
+    destroyTabGraph();
+    projectsGraphStage.hidden = true;
+    projectsList.hidden = false;
+    projectsList.append(emptyLine("Nothing filed from tabs yet. Press Group my tabs to file your open tabs."));
+    return;
+  }
+  projectsGraphStage.hidden = false;
+  mountProjectsGraph();
+}
+
+function renderChromeGroupsSection() {
+  chromeGroupsBody.replaceChildren();
+  if (!chromeGroups) return;
+  chromeGroupsBody.append(sectionLabel("Chrome tab groups"));
+  const filedNames = new Set(tabProjects().map((project) => (project.name || "").trim().toLowerCase()));
+  let shown = 0;
+  for (const group of chromeGroups.groups || []) {
+    if (filedNames.has((group.title || "").trim().toLowerCase())) continue;
+    chromeGroupsBody.append(renderChromeGroupCard(group));
+    shown += 1;
+  }
+  if ((chromeGroups.loose || []).length) {
+    chromeGroupsBody.append(renderChromeGroupCard({ title: "Ungrouped", color: "grey", tabs: chromeGroups.loose }));
+    shown += 1;
+  }
+  if (!shown) chromeGroupsBody.append(emptyLine("No Chrome tab groups right now. Press Group my tabs."));
+}
+
+function renderSuggestionCard(suggestion) {
+  const card = document.createElement("article");
+  card.className = "card";
+  const title = document.createElement("h2");
+  title.textContent = suggestion.label;
+  const line = document.createElement("p");
+  line.className = "one-liner";
+  line.textContent = suggestion.one_liner;
+  const list = document.createElement("ul");
+  list.className = "tabs";
+  for (const tab of suggestion.tabs) {
+    list.append(tabRow(tab, { openable: false }));
+  }
+  const accept = document.createElement("button");
+  accept.type = "button";
+  accept.className = "primary";
+  accept.textContent = "Accept";
+  accept.addEventListener("click", () => acceptSuggestion(suggestion));
+  card.append(title, line, list, accept);
+  return card;
+}
+
+function renderProjectCard(project, { semantic = false } = {}) {
+  const card = document.createElement("article");
+  card.className = "card";
+  const head = document.createElement("div");
+  head.className = "project-head";
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "project-open";
+  open.textContent = project.name || "Untitled";
+  open.addEventListener("click", () => {
+    focusProjectGroup(project.name).then((focused) => {
+      if (focused) {
+        setStatus(`Opened ${project.name}.`);
+        return;
+      }
+      return openProjectTabs(project).then(
+        (result) => setStatus(`Opened ${result.name}.`),
+        (error) => setStatus(error.message),
+      );
+    }).catch((error) => setStatus(error.message));
+  });
+  const title = document.createElement("h2");
+  title.append(open);
+  head.append(title);
+  if (project.intent) head.append(infoMark(project.intent));
+  head.append(deleteProjectControl(project));
+  const count = document.createElement("p");
+  count.className = "meta";
+  const total = (project.links || []).length;
+  count.textContent = total === 1 ? "1 link" : `${total} links`;
+  const list = document.createElement("ul");
+  list.className = "tabs";
+  for (const link of project.links || []) {
+    const semanticMatch = semantic && projectsSemanticMatches.has(urlKey(link.url));
+    list.append(tabRow(link, { openable: true, semanticMatch }));
+  }
+  card.append(head, count, list);
+  return card;
+}
+
+function deleteProjectControl(project) {
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "project-delete";
+  const confirming = deleteConfirmingId === project.id;
+  if (confirming) remove.classList.add("confirming");
+  remove.title = confirming ? "Click again to delete" : "Delete project (tabs stay open)";
+  remove.setAttribute("aria-label", confirming ? `Confirm deleting ${project.name}` : `Delete ${project.name}`);
+  remove.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h10M6.3 4.5V3.2h3.4v1.3M4.3 4.5l.5 8.3h6.4l.5-8.3M6.6 7v3.4M9.4 7v3.4"/></svg>';
+  remove.addEventListener("click", () => {
+    if (deleteConfirmingId !== project.id) {
+      deleteConfirmingId = project.id;
+      renderProjectsBrowser();
+      return;
+    }
+    deleteConfirmingId = null;
+    deleteTabProject(project);
+  });
+  return remove;
+}
+
+async function deleteTabProject(project) {
+  setStatus(`Removing ${project.name}…`);
+  try {
+    const urls = new Set((project.links || []).map((link) => urlKey(link.url)));
+    const updatedProjects = projects.filter((item) => item.id !== project.id);
+    const updatedConversations = conversations.filter((item) => !urls.has(urlKey(item.url)));
+    await persistGraph(updatedProjects, updatedConversations, graphSource);
+    projects = updatedProjects;
+    conversations = updatedConversations;
+    render();
+    let note = `Removed ${project.name}.`;
+    try {
+      const ungrouped = await ungroupProjectTabs(project.name);
+      if (ungrouped) note = `Removed ${project.name} and ungrouped ${ungrouped} tab(s). The tabs stay open.`;
+    } catch (error) {
+      note = `Removed ${project.name}, but could not ungroup its Chrome tabs: ${error.message}`;
+    }
+    setStatus(note);
+  } catch (error) {
+    setStatus(`Could not remove ${project.name}: ${error.message}`);
+  } finally {
+    await loadChromeGroups();
+    if (activeTab === "projects") renderProjectsView();
+  }
+}
+
+function renderChromeGroupCard(group) {
+  const card = document.createElement("article");
+  card.className = "card";
+  const head = document.createElement("div");
+  head.className = "project-head";
+  const swatch = document.createElement("span");
+  swatch.className = "group-swatch";
+  swatch.dataset.color = group.color || "grey";
+  const title = document.createElement("h2");
+  title.textContent = group.title || "Untitled";
+  head.append(swatch, title);
+  const count = document.createElement("p");
+  count.className = "meta";
+  const total = (group.tabs || []).length;
+  count.textContent = total === 1 ? "1 tab" : `${total} tabs`;
+  const list = document.createElement("ul");
+  list.className = "tabs";
+  for (const tab of group.tabs || []) {
+    list.append(tabRow(tab, { openable: true }));
+  }
+  card.append(head, count, list);
+  return card;
+}
+
+function tabRow(item, { openable, semanticMatch = false }) {
+  const li = document.createElement("li");
+  const row = document.createElement(openable ? "button" : "div");
+  if (openable) row.type = "button";
+  row.className = openable ? "tab" : "tab static";
+  if (semanticMatch) row.classList.add("semantic-match");
+  const logo = providerLogo(item.url);
+  if (logo) row.append(logo);
+  const copy = document.createElement("span");
+  copy.className = "tab-copy";
+  const label = document.createElement("span");
+  label.className = "tab-title";
+  label.textContent = item.title || item.url || "Untitled";
+  label.title = item.title || "";
+  copy.append(label);
+  row.append(copy);
+  if (openable && Number.isInteger(item.id)) {
+    row.addEventListener("click", () => {
+      focusTab(item.id).catch((error) => setStatus(error.message));
+    });
+  } else if (openable) {
+    row.addEventListener("click", () => {
+      chrome.tabs.create({ url: item.url, active: true }).catch((error) => setStatus(error.message));
+    });
+  }
+  li.append(row);
+  return li;
+}
+
+function infoMark(text) {
+  const info = document.createElement("span");
+  info.className = "info";
+  const mark = document.createElement("button");
+  mark.type = "button";
+  mark.className = "info-mark";
+  mark.textContent = "i";
+  mark.setAttribute("aria-label", "Project description");
+  const tip = document.createElement("span");
+  tip.className = "info-tip";
+  tip.setAttribute("role", "tooltip");
+  tip.textContent = text;
+  info.append(mark, tip);
+  return info;
+}
+
+function sectionLabel(text) {
+  const heading = document.createElement("h2");
+  heading.className = "section-label";
+  heading.textContent = text;
+  return heading;
+}
+
+function emptyLine(text) {
+  const paragraph = document.createElement("p");
+  paragraph.className = "empty";
+  paragraph.textContent = text;
+  return paragraph;
+}
+
+function mountProjectsGraph() {
+  destroyTabGraph();
+  projectsGraphDetail.hidden = true;
+  projectsGraphDetail.replaceChildren();
+  tabGraphHandle = mountGraph(projectsGraphStage, tabGraphModel({ projects: tabProjects(), suggestions }), {
+    nodeScale: 1.7,
+    rootKinds: ["project", "suggestion"],
+    revealRanges: { link: [0.8, 1.1] },
+    getQuery: () => projectsFind.value.trim(),
+    getSemanticMatches: () => projectsSemanticMatches,
+    onSelect: (node) => {
+      if (!node) {
+        projectsGraphDetail.hidden = true;
+        projectsGraphDetail.replaceChildren();
+        return;
+      }
+      fillGraphDetail(projectsGraphDetail, node, tabGraphOpen, projects);
+    },
+    onOpen: tabGraphOpen,
+  });
+}
+
+function destroyTabGraph() {
+  tabGraphHandle?.destroy();
+  tabGraphHandle = null;
+}
+
+function tabGraphOpen(node) {
+  if (!node) return;
+  if (node.kind === "link") {
+    chrome.tabs.create({ url: node.url, active: true }).catch((error) => setStatus(error.message));
+    return;
+  }
+  if (node.kind === "suggestion") {
+    setStatus(node.intent || node.label);
+    return;
+  }
+  const project = projects.find((item) => item.id === node.id);
+  if (project) {
+    openProjectTabs(project).then(
+      (result) => setStatus(`Opened ${result.name}.`),
+      (error) => setStatus(error.message),
+    );
+  }
 }
 
 function getSelectedArea() {

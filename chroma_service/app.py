@@ -16,6 +16,7 @@ from chroma_service.models import (
     ClusterRequest,
     ProjectAssignmentRequest,
     SearchRequest,
+    TabClusterRequest,
 )
 from chroma_service.typesafe_client import classify_titles_with_typesafe
 
@@ -93,6 +94,11 @@ def cluster_titles(request: ClusterRequest) -> dict:
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/cluster-tabs")
+def cluster_tabs(request: TabClusterRequest) -> dict:
+    return openai_client.cluster_tabs(request)
 
 
 @app.post("/assign-projects")

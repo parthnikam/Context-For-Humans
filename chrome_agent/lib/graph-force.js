@@ -12,9 +12,7 @@ const LINK_LABEL_ZOOM = 1.05;
 const PROJECT_REVEAL = [0.45, 0.75];
 const LINK_REVEAL = [1.05, 1.4];
 
-function zoomReveal(kind, currentZoom) {
-  if (kind === "category") return 1;
-  const [from, to] = kind === "project" ? PROJECT_REVEAL : LINK_REVEAL;
+function rangeReveal([from, to], currentZoom) {
   if (currentZoom <= from) return 0;
   if (currentZoom >= to) return 1;
   return (currentZoom - from) / (to - from);
@@ -41,8 +39,10 @@ function colorFor(node) {
 }
 
 function radiusFor(kind) {
-  if (kind === "category") return 17;
-  if (kind === "project") return 8;
+  if (kind === "category") return 23;
+  if (kind === "project") return 6;
+  if (kind === "child") return 9;
+  if (kind === "suggestion") return 8;
   return 3.5;
 }
 
@@ -94,11 +94,22 @@ export function mountGraph(container, model, options = {}) {
   const ctx = canvas.getContext("2d");
   const theme = themeColors();
 
-  const nodes = model.nodes.map((node) => ({ ...node, r: radiusFor(node.kind) }));
+  const nodeScale = Number(options.nodeScale) > 0 ? Number(options.nodeScale) : 1;
+  const rootKinds = new Set(options.rootKinds || ["category"]);
+  const revealRanges = {
+    project: options.revealRanges?.project || PROJECT_REVEAL,
+    link: options.revealRanges?.link || LINK_REVEAL,
+  };
+  const nodes = model.nodes.map((node) => ({ ...node, r: radiusFor(node.kind) * nodeScale }));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const links = model.edges
     .map((edge) => ({ ...edge, source: byId.get(edge.source), target: byId.get(edge.target) }))
     .filter((edge) => edge.source && edge.target);
+
+  function revealFor(node) {
+    if (rootKinds.has(node.kind)) return 1;
+    return rangeReveal(revealRanges[node.kind === "project" ? "project" : "link"], zoom);
+  }
 
   const simulation = forceSimulation(nodes)
     .force("link", forceLink(links)
@@ -142,7 +153,7 @@ export function mountGraph(container, model, options = {}) {
   function hit(wx, wy) {
     for (let index = nodes.length - 1; index >= 0; index -= 1) {
       const node = nodes[index];
-      if (node !== hover && node !== selected && zoomReveal(node.kind, zoom) < 0.2) continue;
+      if (node !== hover && node !== selected && revealFor(node) < 0.2) continue;
       const dx = node.x - wx;
       const dy = node.y - wy;
       const reach = node.r + 5;
@@ -227,7 +238,8 @@ export function mountGraph(container, model, options = {}) {
     };
     const reveal = (node) => {
       if (node === hover || node === selected || near.has(node.id)) return 1;
-      return zoomReveal(node.kind, zoom);
+      if (matches && matches.has(node.id)) return 1;
+      return revealFor(node);
     };
 
     for (const link of links) {
@@ -255,8 +267,18 @@ export function mountGraph(container, model, options = {}) {
       if (vis >= 0.999) {
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
-        ctx.fillStyle = fill;
-        ctx.fill();
+        if (node.kind === "suggestion") {
+          ctx.fillStyle = theme.bg;
+          ctx.fill();
+          ctx.setLineDash([3, 2]);
+          ctx.lineWidth = 1.4;
+          ctx.strokeStyle = node.color;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
         if (node === hover || node === selected) {
           ctx.lineWidth = 2;
           ctx.strokeStyle = theme.ink;
@@ -308,24 +330,33 @@ export function mountGraph(container, model, options = {}) {
 
   let glideToken = 0;
 
-  function glideToNode(node) {
+  function zoomToNode(node) {
     const token = ++glideToken;
+    const fromZoom = zoom;
     const fromPanX = panX;
     const fromPanY = panY;
-    const toPanX = viewWidth * 0.6 - viewWidth / 2 - node.x * zoom;
-    const toPanY = viewHeight * 0.5 - viewHeight / 2 - node.y * zoom;
+    const toZoom = Math.min(2.4, Math.max(zoom, 1.35));
+    const anchorX = viewWidth * 0.6;
+    const anchorY = viewHeight * 0.5;
+    const toPanX = anchorX - viewWidth / 2 - node.x * toZoom;
+    const toPanY = anchorY - viewHeight / 2 - node.y * toZoom;
     const start = performance.now();
-    const duration = 380;
+    const duration = 450;
     function frame(now) {
       if (token !== glideToken) return;
       const t = Math.min(1, (now - start) / duration);
       const eased = t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
+      zoom = fromZoom + (toZoom - fromZoom) * eased;
       panX = fromPanX + (toPanX - fromPanX) * eased;
       panY = fromPanY + (toPanY - fromPanY) * eased;
       draw();
       if (t < 1) window.requestAnimationFrame(frame);
     }
     window.requestAnimationFrame(frame);
+  }
+
+  function cancelZoomToNode() {
+    glideToken += 1;
   }
 
   function resize() {
@@ -372,7 +403,10 @@ export function mountGraph(container, model, options = {}) {
     }
     const dx = point.x - last.x;
     const dy = point.y - last.y;
-    if (dx * dx + dy * dy > 9) moved = true;
+    if (dx * dx + dy * dy > 9) {
+      moved = true;
+      cancelZoomToNode();
+    }
     last = point;
     if (drag.type === "pan") {
       if (moved) {
@@ -395,11 +429,11 @@ export function mountGraph(container, model, options = {}) {
       node.fy = null;
       if (!moved) {
         selected = node;
+        zoomToNode(node);
         options.onSelect?.(publish(node));
         if (node.kind === "link") {
           options.onOpen?.(publish(node));
         } else {
-          glideToNode(node);
           reheat(0.2);
         }
       } else {
@@ -424,6 +458,7 @@ export function mountGraph(container, model, options = {}) {
   function onWheel(event) {
     event.preventDefault();
     userMovedCamera = true;
+    cancelZoomToNode();
     const point = localPoint(event);
     const prev = zoom;
     const next = Math.min(3, Math.max(0.18, zoom * Math.exp(-event.deltaY * 0.0012)));

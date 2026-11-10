@@ -28,6 +28,18 @@ class EndpointTests(unittest.TestCase):
         self.assertIn("typesafe_model", response)
         self.assertIn("openai_model", response)
 
+    def test_cluster_tabs_route_delegates_to_the_client(self):
+        with patch.object(
+            service.openai_client,
+            "cluster_tabs",
+            return_value={"model": service.config.OPENAI_MODEL, "trails": []},
+        ) as cluster:
+            result = service.cluster_tabs(service.TabClusterRequest(
+                tabs=[{"id": 1, "title": "React docs", "url": "https://a.test/1"}],
+            ))
+        self.assertEqual(result["trails"], [])
+        cluster.assert_called_once()
+
     def test_ask_route_delegates_to_the_qa_pipeline(self):
         with patch.object(
             service.qa,

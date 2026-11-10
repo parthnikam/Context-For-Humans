@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   askQuestion,
   clearChromaIndex,
+  clusterOpenTabs,
   groupConversations,
   listCategories,
   searchTitles,
@@ -52,8 +53,16 @@ const fakeFetch = async (url, init = {}) => {
     assert.ok(body.question.trim().length >= 1);
     return jsonResponse({
       answer: "You filed React Hooks.",
-      memories: ["Project 'React Hooks' contains React hooks guide."],
-      matches: [],
+      model: "gpt-5.6-luna",
+      sources: [{ title: "React hooks guide", url: incoming[0].url }],
+      projects: ["React Hooks"],
+    });
+  }
+  if (parsedUrl.pathname === "/cluster-tabs") {
+    assert.ok(body.tabs.length >= 1);
+    return jsonResponse({
+      model: "gpt-5.6-luna",
+      trails: [{ label: "React work", one_liner: "Learning React.", tab_ids: body.tabs.map((tab) => tab.id) }],
     });
   }
   if (parsedUrl.pathname === "/categories") {
@@ -158,7 +167,15 @@ assert.deepEqual(await testTypeSafeService({ fetch: fakeFetch }), {
 assert.deepEqual(await testMem0Service({ fetch: fakeFetch }), { ok: true });
 const asked = await askQuestion("what was I working on?", { fetch: fakeFetch });
 assert.equal(asked.answer, "You filed React Hooks.");
-assert.equal(asked.memories.length, 1);
+assert.equal(asked.sources.length, 1);
+assert.equal(asked.projects[0], "React Hooks");
+const clustered = await clusterOpenTabs(
+  [{ id: 1, title: "React docs", url: "https://provider-a.test/1" }],
+  [{ name: "React project", intent: "" }],
+  { fetch: fakeFetch },
+);
+assert.equal(clustered.trails[0].label, "React work");
+assert.deepEqual(clustered.trails[0].tab_ids, [1]);
 await assert.rejects(() => askQuestion("   ", { fetch: fakeFetch }), /Ask a question first/);
 assert.deepEqual((await listCategories({ fetch: fakeFetch })).categories.map((category) => category.id), [
   "programming",

@@ -94,6 +94,16 @@ export async function askQuestion(question, options = {}) {
   });
 }
 
+export async function clusterOpenTabs(tabs, projects = [], options = {}) {
+  return requestJson("/cluster-tabs", {
+    ...options,
+    method: "POST",
+    body: { tabs, projects },
+    service: "OpenAI",
+    stage: "Cluster open tabs",
+  });
+}
+
 export async function listCategories(options = {}) {
   return requestJson("/categories", {
     ...options,

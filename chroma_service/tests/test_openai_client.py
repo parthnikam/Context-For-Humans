@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 from chroma_service import openai_client
-from chroma_service.models import ProjectAssignmentRequest
+from chroma_service.models import ProjectAssignmentRequest, TabClusterRequest
 from chroma_service.tests.helpers import openai_response
 
 
@@ -167,6 +167,32 @@ class OpenAiClientTests(unittest.TestCase):
         error = openai_client.openai_http_error(response, secret)
         self.assertNotIn(secret, error.detail)
         self.assertIn("[redacted]", error.detail)
+
+    def test_cluster_tabs_normalizes_trails(self):
+        response = openai_response({
+            "trails": [
+                {"label": "React work", "one_liner": "Learning React.", "tab_ids": [1, 2, 99]},
+                {"label": "", "one_liner": "", "tab_ids": [2]},
+            ],
+        })
+        request = TabClusterRequest(
+            tabs=[
+                {"id": 1, "title": "React docs", "url": "https://a.test/1"},
+                {"id": 2, "title": "React forum", "url": "https://a.test/2"},
+                {"id": 3, "title": "Python docs", "url": "https://a.test/3"},
+            ],
+            projects=[{"name": "React learning", "intent": ""}],
+        )
+        with patch.object(openai_client, "load_openai_api_key", return_value="unit-test-key"), \
+                patch.object(openai_client.requests, "post", return_value=response) as post:
+            result = openai_client.cluster_tabs(request)
+        self.assertEqual(result["trails"][0]["label"], "React work")
+        self.assertEqual(result["trails"][0]["tab_ids"], [1, 2])
+        self.assertEqual(result["trails"][1]["label"], "Ungrouped")
+        self.assertEqual(result["trails"][1]["tab_ids"], [3])
+        payload = post.call_args.kwargs["json"]
+        self.assertTrue(payload["response_format"]["json_schema"]["strict"])
+        self.assertIn("React learning", payload["messages"][1]["content"])
 
 
 if __name__ == "__main__":

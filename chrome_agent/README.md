@@ -32,9 +32,9 @@ MEM0_API_KEY=your-mem0-key
 
 `MEMO_API_KEY` is also accepted. Restart the local service after creating or changing `.env`. The service reads keys from its environment first and then from this file. Keys stay in the Python service; they are not stored in Chrome, sent by the extension, or written to the debug console. In **AI grouping settings**, select **Test service**, **Test Jev**, **Test OpenAI**, and **Test Mem0** to check the connections. Jev uses the `jev-latest` Choice model; OpenAI project naming and project answers use `gpt-5.6-luna`; Mem0 remembers filed projects so you can ask about them later. See [TypeSafe's Choice docs](https://docs.typesafe.ai/primitives/choice) for the classification primitive.
 
-## Group conversations
+## Group conversations and tabs
 
-The side panel has two tabs. **Graph** holds the Ask chatbox at the top and the category browser below it. **Import** holds the extraction tools, the AI grouping settings (service tests and similarity threshold), and the API debug console.
+The side panel has three tabs. **Conversations** holds the Ask bar at the top and the category browser below it. **Projects** is the tab home: press **Group my tabs** to cluster your open tabs into Chrome tab groups (auto-filed into your projects), then browse everything filed with the list/graph toggle — the same pattern as Conversations — plus your live Chrome URL tab groups below. **Import** holds the extraction tools, the AI grouping settings (service tests and similarity threshold), and the API debug console.
 
 1. Start the local service, then open the **Import** tab and select **Test service**, **Test Jev**, **Test OpenAI**, and **Test Mem0**.
 2. To extract from a chat page, select **Detect chat list**.
@@ -42,7 +42,9 @@ The side panel has two tabs. **Graph** holds the Ask chatbox at the top and the 
 4. Select **Extract & group**. The extension scrolls through the list, waits for lazy-loaded items, and groups collected link titles and URLs. After three bottom nudges produce no new links, it stops. A new link resets the counter. Select **Cancel** to stop early.
 5. Or select **Import title,url CSV** to group conversations from a CSV. The header must contain `title` and `url` columns; `conversation_title` is also accepted.
 6. Browse the category list in **list view**, or select the graph icon in the toolbar for an interactive **graph view**: a live d3-force simulation of every category, project, and conversation, with vibrant per-category colors. Zoomed out only the categories are crisp; zoom in and the projects, then conversation links, pull into focus from a soft blur. Drag nodes and the physics re-settles; hover to highlight a neighborhood; click a node for details; double-click to open it; pan and scroll to zoom. Use the search field to filter by words or meaning in either view; ChromaDB semantic matches are highlighted with a ring.
-7. Use **Ask** at the bottom of the side panel to ask questions about your projects ("what was I working on with React?"). The service retrieves Mem0 memories of every filed project plus semantically matched conversations from ChromaDB, and OpenAI answers using only that context. Filing or importing conversations stores each project in Mem0 automatically. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
+7. Use **Ask** at the top of the Conversations tab to ask questions about your projects ("what was I working on with React?"). A `gpt-5.6-luna` agent decides which tools to call: `search_memory` (Mem0) and `search_conversations` (ChromaDB semantic search over filed titles). It answers only from what the tools find, links the source conversations under the answer, and replies "oops. i don't have that in my memory" when nothing matches. Filing or importing conversations stores each project in Mem0 automatically.
+8. On the **Projects** tab, press **Group my tabs**. Tabs whose URLs match a filed project join that project's Chrome tab group; the rest are clustered into trails by `gpt-5.6-luna` (same grouping rules as the original Context For Humans tab grouper) and grouped in Chrome with a name and one-liner. The trails are then **auto-accepted**: each one is filed through the full conversation pipeline — Jev categorizes the links, ChromaDB clusters them, the project keeps the trail's name, and Mem0 remembers it — with no extra clicks. (If the filing pipeline fails, the trails fall back to suggestion cards you can Accept manually.) Click a filed project name to reopen its links in a Chrome tab group.
+9. Below the projects browser, the **Chrome tab groups** section lists your live URL tab groups (with their color swatches) and any ungrouped tabs. The projects graph inside the Projects tab renders every filed project, its links, and any open suggestions in the live d3-force graph (vibrant colors, hover focus, drag, pan, zoom; suggestions appear as dashed rings). Double-click a project node to reopen its tabs. **Clear graphs** removes the saved graph and local index after confirmation. **View larger** opens the same category browser in a full browser tab. **Download CSV** exports the current conversation data.
 
 Expand **API debug console** in the side panel to inspect local-service requests, ChromaDB clusters and category results, semantic search results, and OpenAI assignment payloads and responses. The service does not include API keys or authorization headers in these records. The console remains in memory only and is cleared when the panel closes.
 
@@ -68,6 +70,8 @@ chrome_agent/
   lib/                   Shared modules: local-service client (grouping.js),
                          list view + view toggle (graph-view.js),
                          force-directed canvas graph (graph-force.js),
+                         tab grouping engine (tab-groups.js),
+                         tab graph model (tab-graph-model.js),
                          detail panel (graph-detail.js), provider logos
                          (provider-logos.js), graph state/model, extraction,
                          page actions, CSV parsing and download
